@@ -77,7 +77,10 @@ public class CustomerReceiptAllocationTests
         return user.Id;
     }
 
-    /// <summary>绑定特权身份（既有收款单菜单 + 不受限客户范围）的真实 HTTP 请求控制器。</summary>
+    /// <summary>
+    /// 绑定特权身份（既有「收款单」菜单 + 不受限客户范围）的真实请求上下文控制器（ERP-468）：
+    /// <strong>不设置</strong> <c>Request.Path</c>，证明实时授权判定与请求路径 / 请求形状完全无关。
+    /// </summary>
     private static CustomerReceiptAllocationController BuildController(ErpDbContext db)
     {
         var userId = SeedPrivilegedUser(db);
@@ -86,7 +89,6 @@ public class CustomerReceiptAllocationTests
             User = new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
         };
-        http.Request.Path = "/api/customer-receipt-allocations";
         return new CustomerReceiptAllocationController(db)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -1088,7 +1090,10 @@ public class CustomerReceiptAllocationTests
         db.SaveChanges();
     }
 
-    /// <summary>绑定真实 HTTP 请求管线（Request.Path 已赋值）+ 指定身份（可空 = 匿名请求）。</summary>
+    /// <summary>
+    /// 绑定真实请求上下文 + 指定身份（可空 = 匿名请求）；<strong>不设置</strong> <c>Request.Path</c>（ERP-468），
+    /// 证明空路径与已赋值路径的授权口径完全一致，缺失身份一律 fail closed。
+    /// </summary>
     private static CustomerReceiptAllocationController BuildControllerWithUser(ErpDbContext db, long? userId)
     {
         var claims = userId.HasValue
@@ -1098,7 +1103,6 @@ public class CustomerReceiptAllocationTests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
         };
-        http.Request.Path = "/api/customer-receipt-allocations";
         return new CustomerReceiptAllocationController(db)
         {
             ControllerContext = new ControllerContext { HttpContext = http }

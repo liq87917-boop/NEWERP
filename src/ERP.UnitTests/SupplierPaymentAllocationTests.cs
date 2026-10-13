@@ -106,12 +106,15 @@ public class SupplierPaymentAllocationTests
             ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
             : Array.Empty<Claim>();
         var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) };
-        // 标记为真实 HTTP 路由（Request.Path 已赋值）：缺失身份也必须实时授权并 fail closed。
-        http.Request.Path = "/api/supplier-payment-allocations";
+        // ERP-468：绑定真实请求上下文（不设置 Request.Path）——空路径与已赋值路径口径完全一致，
+        // 缺失身份也必须实时授权并 fail closed，授权判定不依赖请求形状。
         controller.ControllerContext = new ControllerContext { HttpContext = http };
     }
 
-    /// <summary>默认注入具备既有付款单菜单的特权身份（未显式指定 userId 时），聚焦引用证据业务语义</summary>
+    /// <summary>
+    /// 绑定特权身份（既有「付款单」菜单 + 不受限客户范围）的真实请求上下文控制器（ERP-468）：
+    /// <strong>不设置</strong> <c>Request.Path</c>，证明实时授权判定与请求路径 / 请求形状完全无关。
+    /// </summary>
     private static SupplierPaymentAllocationController BuildController(ErpDbContext db, long? userId = null)
     {
         var controller = new SupplierPaymentAllocationController(db);
