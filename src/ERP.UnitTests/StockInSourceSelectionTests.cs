@@ -513,6 +513,71 @@ public class StockInSourceSelectionTests
         Assert.Equal(before, db.StockIns.Count());
     }
 
+    // ==================== 9b. ERP-477：显式清空来源 = 未链接（保留服务端身份与明细） ====================
+
+    [Fact]
+    public async Task 显式清空来源_保存为未链接且保留服务端身份与明细()
+    {
+        using var db = TestDbFactory.Create();
+        SeedMaster(db);
+        SeedStockInNumberRule(db);
+        var ctl = StockInTestAuthorization.ForUser(db, SeedPrivilegedOperator(db));
+        var order = SeedOrder(db, "PO-SI-UNLINK", DocumentStatus.Approved, SupplierA,
+            lines: new[] { (ProductA, "商品A", "规格A", "PCS", 10m) });
+        SeedReceipt(db, order.Id, SupplierA, DocumentStatus.Approved, false, (ProductA, "PCS", 3m));
+
+        var detail = Detail(await ctl.GetSourceCandidateDetail(order.Id));
+        var line = Assert.Single(detail.Lines);
+        var id = CreatedId(await ctl.Create(new StockIn
+        {
+            StockInDate = DateTime.Today,
+            PurchaseOrderId = detail.PurchaseOrderId,
+            SupplierId = detail.SupplierId,
+            WarehouseId = WarehouseA,
+            Details = new List<StockInDetail>
+            {
+                new()
+                {
+                    ProductId = line.ProductId, ProductName = line.ProductName, Spec = line.Spec,
+                    Unit = line.BaseUnit, Quantity = 2m
+                }
+            }
+        }));
+        var number = db.StockIns.Single(s => s.Id == id).StockInNo;
+
+        // 显式清空来源（数字 0 = 表单「未选择」/ 选择器清空）：保存为未链接，单据号 / 状态 / 明细身份不变。
+        var result = await ctl.Update(id, new StockIn
+        {
+            StockInDate = DateTime.Today,
+            PurchaseOrderId = 0,
+            SupplierId = SupplierA,
+            WarehouseId = WarehouseA,
+            Details = new List<StockInDetail>
+            {
+                new()
+                {
+                    ProductId = line.ProductId, ProductName = line.ProductName, Spec = line.Spec,
+                    Unit = line.BaseUnit, Quantity = 2m
+                }
+            }
+        });
+        Assert.IsType<OkObjectResult>(result);
+
+        var reopened = Assert.IsType<StockIn>(Assert.IsType<ApiResponse<StockIn>>(
+            Assert.IsType<OkObjectResult>(await ctl.GetById(id)).Value).Data!);
+        Assert.Null(reopened.PurchaseOrderId);                    // 未链接的历史语义
+        Assert.Equal(number, reopened.StockInNo);                 // 单据号仍由服务端保持
+        Assert.Equal(DocumentStatus.Pending, reopened.Status);
+        Assert.Equal(SupplierA, reopened.SupplierId);
+        Assert.Equal(WarehouseA, reopened.WarehouseId);
+        var saved = Assert.Single(reopened.Details);
+        Assert.Equal(2m, saved.Quantity);
+        Assert.Equal(2m, reopened.TotalQuantity);
+
+        // 只读候选投影不受清空影响：未审核单据不占用剩余可收数量，来源仍可收 7。
+        Assert.Equal(7m, Assert.Single(Candidates(await ctl.GetSourceCandidates(null, null, 0))).RemainingBaseQuantity);
+    }
+
     // ==================== 10. 供应商筛选与关键字有界匹配 ====================
 
     [Fact]

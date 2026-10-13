@@ -17,7 +17,9 @@
      5. **保留用户所选仓库**：选择器绝不改写仓库字段（仓库由操作员在有界选项中选择）；
      6. 保存 / 重开：来源 Id 由既有创建 / 修改接口持久化并原样回显；
         未选来源（null / 表单留空）的历史入库保持「无来源」，绝不回填；
-     7. 非「待提交」单据只读（服务端同样 fail closed），失败时保留表单输入并显式提示。
+     7. 非「待提交」单据只读（服务端同样 fail closed），失败时保留表单输入并显式提示；
+     8. ERP-477：提供显式「清空来源（回到未链接）」——只清空来源引用字段（保存时提交 null = 历史未链接语义），
+        **绝不删除用户已录入的明细行**，也绝不臆造来源；单据号 / 状态 / 身份仍由服务端权威覆盖。
    边界：本选择器只做只读候选展示与表单回填：不锁库、不预留库存、不写流水 / 财务、
          不改写采购订单 / 商品 / 供应商主数据，也不新增表 / 菜单 / 用户授权。
    ================================================================================== */
@@ -388,6 +390,22 @@ function sisApplyToForm() {
   toast(SIS.result);
 }
 
+/* ERP-477：显式清空来源（回到「未链接」历史语义）：只清空来源引用字段，
+   **绝不删除用户已录入的明细行**，也绝不臆造来源；保存时提交 null（声明式可空引用），
+   服务端同样把原始数字 0 归一为 null —— 两种表示落到同一「无来源入库单」语义。 */
+function sisClearSource() {
+  if (typeof document === 'undefined') return false;      // Node 单测只验证接线契约，不臆造浏览器环境
+  if (SIS.readonly) { toast(sisReadonlyReason(SIS.status), 'error'); return false; }
+  sisSetField('purchaseOrderId', '');
+  SIS.detail = null;
+  SIS.quantities = {};
+  SIS.error = '';
+  SIS.result = '已清空来源（保存后按「未链接采购订单」的入库单保存；明细行未被删除，可继续手工录入）';
+  sisRender();
+  toast(SIS.result);
+  return true;
+}
+
 function sisDetailHtml(detail) {
   if (!detail) return '';
   const lines = (detail.lines || []).map(line => {
@@ -467,6 +485,9 @@ function sisRender() {
       ${sisDetailHtml(SIS.detail)}
       <div class="modal-footer">
         <button type="button" class="btn btn-neutral" onclick="sisCloseModal()">取消</button>
+        <button type="button" class="btn btn-neutral" ${SIS.readonly ? 'disabled ' : ''}
+                title="清空来源引用（保存后按未链接入库单保存）；不删除已录入明细行"
+                onclick="sisClearSource()">清空来源（未链接）</button>
         <button type="button" class="btn btn-primary" ${sisCanApply(SIS) ? '' : 'disabled '}
                 onclick="sisApplyToForm()">应用到表单</button>
       </div>
@@ -572,5 +593,6 @@ if (typeof module !== 'undefined' && module.exports) {
     sisErrorMessage,
     sisSourceButtonHtml,
     sisInstallFormHook,
+    sisClearSource,
   };
 }

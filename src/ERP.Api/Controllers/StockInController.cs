@@ -20,7 +20,14 @@ namespace ERP.Api.Controllers;
 /// ERP-025 的移动加权平均兜底，不臆造成本单价、不改写历史流水数量与金额。</para>
 /// <para>ERP-375：新增只读、有界的采购订单来源候选 / 详情端点（既有「采购入库」+「采购订单」菜单 + ERP-371 权威客户范围），
 /// 供业务表单显式选择来源并回填权威供应商与可收货商品行；候选选择绝不臆造成本，也绝不改动 ERP-033 成本口径与
-/// ERP-342 收货容量口径。表单「未选择来源」（数字 0）归一为 <c>null</c>，保持历史无来源入库单语义。</para>
+/// ERP-342 收货容量口径。表单「未选择来源」（数字 0 或声明式可空引用提交 <c>null</c>）归一为 <c>null</c>，
+/// 保持历史无来源入库单语义。</para>
+/// <para>ERP-477：既有「采购入库」菜单改为打开<b>规范 EF 主子表模块</b>（<c>api/stock-ins</c>，规范 <c>Id</c> 口径），
+/// 不再映射到已由 ERP-404 门禁整体停用（fail closed）的旧存储过程族；旧族 <c>Oid</c> 读侧 / 导出保持只读可用，
+/// 规范 <c>Id</c> 与旧 <c>Oid</c> 之间<b>不存在</b>任何映射，也绝不启用任何旧写适配器。
+/// 新增 / 修改在实时授权、供应商 / 仓库可用性与来源归属校验（含基础单位折算与 ERP-342 累计容量）之后、
+/// <b>单号预约与任何写入之前</b>完成全部校验：主键 / 入库单号 / 状态 / 删除态 / 时间戳与明细身份一律由服务端权威覆盖，
+/// 被拒绝的请求零表头 · 明细 · 来源 · 状态变化且不消耗单据号（ERP-352 口径）。</para>
 /// </summary>
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
@@ -118,25 +125,37 @@ public class StockInController : DocumentControllerBase<StockIn>
         => await PurchaseOrderAuthorizationRules.ApplyScopeAsync(
             Db, Db.PurchaseOrders.AsNoTracking(), CurrentInboundUserId());
 
-    /// <summary>创建</summary>
+    /// <summary>
+    /// 创建（ERP-477：省略 / 空串 / 伪造入库单号照常进入本动作，单号与身份由服务端权威覆盖；
+    /// 全部授权 · 来源 · 单位折算 · 累计容量校验都在<b>单号预约与任何写入之前</b>完成，
+    /// 被拒绝的请求零写入、零占号）。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockIn entity)
     {
-        // ERP-375：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0）；归一为 null，
+        // ERP-375 / ERP-477：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0），
+        // 或按 ERP-477 的声明式可空引用（nullable）直接提交 null；两者都归一为 null，
         // 保持历史「无来源」入库单语义（null），绝不把 0 当成无效显式链接拒绝。
         NormalizePurchaseOrderLink(entity);
+        entity.Details ??= new List<StockInDetail>();
 
-        // 授权与来源校验先于单号生成：被拒绝方绝不消耗单据号（ERP-352）。
+        // 授权与来源 / 累计容量校验先于单号生成与任何写入：被拒绝方绝不消耗单据号、绝不落库（ERP-352）。
         await StockInAuthorizationRules.EnsureAuthorizedAsync(
             Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
-        entity.Id = 0;
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
         await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
 
+        // ERP-477：主键 / 单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖（客户端提交值不参与持久化），
+        // 明细身份（主键 / 归属单据 / 删除态）同口径重置，绝不采信客户端注入的明细 Id / IsDeleted / 表头身份。
+        var now = DateTime.Now;
+        entity.Id = 0;
+        ApplyServerOwnedDetailIdentity(entity.Details, 0, now);
         entity.StockInNo = await _noService.GenerateAsync(DocumentType.StockIn);
         entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
+        entity.IsDeleted = false;
+        entity.CreatedAt = now;
+        entity.UpdatedAt = null;
         Db.StockIns.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.StockInNo }, "入库单创建成功"));
@@ -160,12 +179,16 @@ public class StockInController : DocumentControllerBase<StockIn>
         return await base.Delete(id);
     }
 
-    /// <summary>更新</summary>
+    /// <summary>
+    /// 更新（ERP-477：来源归属先校验，单据身份 · 单号 · 状态与明细身份全部由服务端保持权威；
+    /// 仅「待提交」可修改，被拒绝的请求零写入、零状态变化）。
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] StockIn entity)
     {
-        // ERP-375：与创建同一口径——表单「未选择来源」（0）归一为 null，保持历史无来源语义。
+        // ERP-375 / ERP-477：与创建同一口径——表单「未选择来源」（0 或 null）归一为 null，保持历史无来源语义。
         NormalizePurchaseOrderLink(entity);
+        entity.Details ??= new List<StockInDetail>();
 
         var existing = await Db.StockIns.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
@@ -186,12 +209,8 @@ public class StockInController : DocumentControllerBase<StockIn>
         existing.Remark = entity.Remark;
 
         Db.StockInDetails.RemoveRange(existing.Details);
-        foreach (var d in entity.Details)
-        {
-            d.Id = 0;
-            d.StockInId = id;
-            d.CreatedAt = DateTime.Now;
-        }
+        // ERP-477：单据号 / 状态 / 删除态由服务端保持（客户端提交值不参与持久化），明细身份同口径重置。
+        ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
         existing.Details = entity.Details;
         await StockUnitConversion.NormalizeAsync(Db, existing.Details);
         Calculate(existing);
@@ -381,6 +400,23 @@ public class StockInController : DocumentControllerBase<StockIn>
     private static void NormalizePurchaseOrderLink(StockIn entity)
     {
         if (entity.PurchaseOrderId == 0) entity.PurchaseOrderId = null;
+    }
+
+    /// <summary>
+    /// ERP-477：明细身份 / 归属单据 / 删除态 / 时间戳一律由服务端权威覆盖：客户端提交的明细主键一律置 0（自增），
+    /// 归属单据取自服务端已知的单据 Id（新建为 0，由 EF 关系在保存时回填），删除态强制为「正常」，
+    /// 时间戳以服务端时钟为准。绝不采信客户端注入的明细身份 / 删除态，也绝不臆造任何明细行。
+    /// </summary>
+    private static void ApplyServerOwnedDetailIdentity(IEnumerable<StockInDetail> details, long stockInId, DateTime now)
+    {
+        foreach (var d in details)
+        {
+            d.Id = 0;
+            d.StockInId = stockInId;
+            d.IsDeleted = false;
+            d.CreatedAt = now;
+            d.UpdatedAt = null;
+        }
     }
 
     private static void Calculate(StockIn entity)

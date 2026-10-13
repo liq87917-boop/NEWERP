@@ -13,6 +13,8 @@ namespace ERP.UnitTests;
 /// <summary>
 /// StockInController 单元测试：Create 汇总 TotalQuantity/Weight/Volume + 重写的 Approve 按基础单位增加库存
 /// （ERP-025 起经 InventoryService 记账并写库存流水，流水细节见 StockInOutMovementLedgerTests）。
+/// <para>ERP-477：采购入库菜单改由规范 EF 主子表模块承载，手工表单不提交入库单号（省略 / 空串照常绑定，
+/// 服务端权威生成单号并覆盖身份 / 状态）。</para>
 /// </summary>
 public class StockInControllerTests
 {
@@ -52,6 +54,41 @@ public class StockInControllerTests
         using var db = TestDbFactory.Create();
         var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
+    }
+
+    /// <summary>
+    /// ERP-477：手工录入表单不提交入库单号（空串 / 省略）与身份 / 状态：绑定层放行后，
+    /// 服务端权威生成入库单号并覆盖状态为「待提交」，客户端伪造值不参与持久化。
+    /// </summary>
+    [Fact]
+    public async Task Create_空串入库单号与伪造身份_服务端权威覆盖()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
+
+        var stockIn = new StockIn
+        {
+            StockInNo = string.Empty,
+            StockInDate = DateTime.Today,
+            SupplierId = 999999L,
+            WarehouseId = 999999L,
+            Status = DocumentStatus.Approved,
+            IsDeleted = true,
+            Details = new List<StockInDetail>
+            {
+                new StockInDetail { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 2m }
+            }
+        };
+
+        var result = await ctl.Create(stockIn);
+        Assert.IsType<OkObjectResult>(result);
+
+        var saved = db.StockIns.Single();
+        Assert.StartsWith("RK", saved.StockInNo);
+        Assert.Equal(DocumentStatus.Pending, saved.Status);
+        Assert.False(saved.IsDeleted);
+        Assert.True(saved.UpdatedAt > DateTime.Today.AddMinutes(-5));
+        Assert.Equal(2m, saved.TotalQuantity);
     }
 
     [Fact]

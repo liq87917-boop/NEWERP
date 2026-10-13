@@ -68,6 +68,10 @@ const STOCK_OUT_DETAIL_FIELDS = [
 ];
 
 Object.assign(MODULES, {
+  /* ERP-477：采购入库菜单（菜单编码 stock-in）直接打开本规范 EF 主子表模块（api/stock-ins，规范 Id 口径）——
+     bill-v2.js 的 BILL_CODE_MAP 已移除 stock-in → 旧存储过程族映射（旧族写路径由 ERP-404 门禁 fail closed）。
+     主表 + 明细一起保存 / 回填；来源采购订单由 ERP-375 显式选择器（selector: 'stock-in-source'）按服务端权威
+     剩余可收数量回填，也可手工填写来源 Id 或留空 = 未链接（历史语义）；入库成本仍由服务端 ERP-033 口径兜底。 */
   'stock-in': {
     title: '采购入库', api: '/api/stock-ins', canSubmit: true,
     columns: [
@@ -77,9 +81,11 @@ Object.assign(MODULES, {
     ],
     fields: [
       { key: 'stockInDate', label: '入库日期', type: 'date' },
-      /* ERP-375：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id 与可收货商品行，
-         绝不臆造成本（成本仍由服务端 ERP-033 口径按来源采购订单兜底）；留空（未选择）保持「无来源」语义 */
-      { key: 'purchaseOrderId', label: '来源采购订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'stock-in-source' },
+      /* ERP-375 / ERP-477：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id 与可收货商品行，
+         绝不臆造成本（成本仍由服务端 ERP-033 口径按来源采购订单兜底）；留空（未选择）保持「无来源」语义。
+         nullable: true —— 声明式可空引用：清空 / 留空时提交 null（而不是哨兵值 0），服务端仍同时把原始数字 0
+         归一为 null，两种表示都落到同一「未链接」历史语义。 */
+      { key: 'purchaseOrderId', label: '来源采购订单 ID（可留空 = 未链接；建议用「选择来源」）', type: 'number', nullable: true, selector: 'stock-in-source' },
       { key: 'supplierId', label: '供应商Id', type: 'number' },
       { key: 'warehouseId', label: '仓库Id', type: 'number' }, { key: 'totalQuantity', label: '总数量', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },

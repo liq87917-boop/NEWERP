@@ -23,8 +23,13 @@ const BILL_CODE_MAP = {
      因此这里**不再**把 'inquiry-new' 映射到旧存储过程族 'inquiry' —— 旧族的写路径已被 ERP-404 门禁
      整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页。
      旧族自身（BILL_CONFIG.inquiry 的旧库单体表 Oid 读侧 / 旧导出 / 默认值端点）保持只读可用，
+     规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。
+     ERP-477：采购入库菜单（stock-in）同样改由 EF 主子表页面承载
+     （modules-doc2.js 的 'stock-in' 模块 + /api/stock-ins，规范 Id 口径 + 明细 + ERP-375 来源选择器），
+     因此这里**不再**把 'stock-in' 映射到旧存储过程族 —— 旧族的写路径已被 ERP-404 门禁整体停用
+     （fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页（api/v2/bills 写入口必然被拒）。
+     旧族自身（BILL_CONFIG['stock-in'] 的旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，
      规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。 */
-  'stock-in': 'stock-in',
   'stock-out': 'stock-out',
   receipt: 'receipt',
   payment: 'payment',

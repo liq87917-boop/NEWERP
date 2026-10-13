@@ -275,6 +275,44 @@ public class StockInOrderFulfillmentTests
         Assert.Contains("超过来源采购订单授权数量 12", ex.Message);
     }
 
+    // ==================== ERP-477：规范主 / 明细表单的履约零副作用 ====================
+
+    [Fact]
+    public async Task Approve_负数明细数量_受控拒绝且零库存零流水且状态保持已提交()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, ProductA, "P-FUL-16", "商品A", "PCS", string.Empty, 0);
+        var ctl = NewController(db);
+
+        var id = await CreateAsync(ctl, null, SupplierA, (ProductA, "PCS", -1m));
+        await ctl.Submit(id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("不能为负数", ex.Message);
+        Assert.Empty(db.StockMovements);
+        Assert.Empty(db.Stocks);
+        Assert.Equal(DocumentStatus.Submitted, db.StockIns.Single(s => s.Id == id).Status);
+    }
+
+    [Fact]
+    public async Task Approve_零数量明细_允许空草稿但审核不产生任何库存变动()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, ProductA, "P-FUL-17", "商品A", "PCS", string.Empty, 0);
+        var ctl = NewController(db);
+
+        var id = await CreateAsync(ctl, null, SupplierA, (ProductA, "PCS", 0m));
+        await SubmitAndApproveAsync(ctl, id);
+
+        Assert.Empty(db.Stocks);
+        Assert.Empty(db.StockMovements);
+        var saved = db.StockIns.Single(s => s.Id == id);
+        Assert.Equal(DocumentStatus.Approved, saved.Status);
+        Assert.Equal(0m, saved.TotalQuantity);
+    }
+
     // ==================== 权限与口径 ====================
 
     [Fact]
