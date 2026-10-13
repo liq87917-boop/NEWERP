@@ -59,6 +59,22 @@ public static class SalesOrderConversion
     }
 
     /// <summary>
+    /// 「PI → 销售订单」转换（下游承诺）前的**来源实时主数据引用**复核（ERP-473）：
+    /// 与 PI 写入 / 提交 / 审核共用**同一份** <see cref="ProformaInvoiceMasterReferenceRules"/> 契约 ——
+    /// 可选客户（留空跳过；填写必须解析到存在 / 未删除 / 启用客户）、可选业务员（留空跳过；填写必须解析到
+    /// 存在 / 未删除 / 在职且为业务员的员工；无对应员工行的历史悬空 Id 保留为既有手工快照）、
+    /// 每条有效明细的商品（留空 = 手工快照行；填写必须为正整数，商品资料**一次有界批量查询**；
+    /// 解析到既有商品行时不得已删除 / 已停用，无对应商品行时自带受界商品文本的手工快照行保留、
+    /// 纯目录引用按缺失引用拒绝）。
+    /// <para>调用方必须在既有「PI 来源行锁 + 原子事务」内、构造销售订单与预约订单号<b>之前</b>调用：
+    /// 失败即受控拒绝且零订单、零占号、来源 PI 状态与历史快照文本一行不改（绝不回填 / 绝不静默改派）。
+    /// 本方法只做纯判定与有界只读查询，不落库、不改写任何主数据或单据。</para>
+    /// </summary>
+    public static Task EnsureSourceMasterReferencesAsync(IErpDbContext db, ProformaInvoice pi,
+        CancellationToken ct = default)
+        => ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync(db, pi, ct);
+
+    /// <summary>
     /// 转换结果与来源 PI 的权威重读不一致时的拒绝文案（ERP-399）。
     /// </summary>
     public const string DraftMismatchText =

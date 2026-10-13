@@ -42,6 +42,26 @@ public class QuotationController : DocumentControllerBase<Quotation>
         if (!scope.AllowsCustomer(entity.CustomerId)) throw QuotationNotFound();
     }
 
+    // ==================== ERP-473：报价单 → PI 生成草稿的实时主数据引用复核 ====================
+
+    /// <summary>
+    /// ERP-473：是否必须复核「报价单 → PI」生成草稿的实时主数据引用。<strong>真实 HTTP 写入请求（MVC 绑定，
+    /// <c>Request.Path</c> 已赋值）一律执行</strong>；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）
+    /// 保持既有行为 —— 与 <see cref="ProformaInvoiceController"/> 及 ERP-427 同一取舍：这类调用不可能由外部请求到达。
+    /// </summary>
+    private bool RequiresLivePiMasterValidation()
+        => ControllerContext?.HttpContext?.Request.Path.HasValue == true;
+
+    /// <summary>
+    /// ERP-473：复核「报价单 → PI」生成草稿的实时主数据引用（可选客户 / 可选业务员 / 每条有效明细的商品，
+    /// 商品资料有界批量查询）；只做纯判定与有界只读查询，绝不写主数据、不改写来源报价单、不消耗任何单号。
+    /// </summary>
+    private async Task EnsurePiMasterReferencesAsync(ProformaInvoice pi)
+    {
+        if (!RequiresLivePiMasterValidation()) return;
+        await ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync(Db, pi);
+    }
+
     // ==================== ERP-400 确定性报价单来源行锁 + 原子事务 ====================
 
     /// <summary>
@@ -698,6 +718,10 @@ public class QuotationController : DocumentControllerBase<Quotation>
             // ERP-471：PI 商业条款（币种 / 汇率 / 逐行数量 · 单价 / 定金比例 · 金额）在单号预约与任何写入
             // 之前按 PI 唯一权威契约复核——报价转 PI 绝不把非法来源商业值写成可提交 / 可转换的 PI。
             ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(pi);
+            // ERP-473：报价单生成的 PI 草稿在预约 PI 号与任何写入之前复核**实时主数据引用**（客户 / 业务员 /
+            // 明细商品）—— 失效引用绝不通过「报价单 → PI」变成可提交 / 可转订单的实时履约；
+            // 被拒绝的转换零写入、零占号，来源报价单状态一行不改。
+            await EnsurePiMasterReferencesAsync(pi);
             QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, pi.CustomerId);
             SalesOrderConversion.EnsureQuotationConversionScopeAuthorized(scope, quotation.CustomerId, pi.CustomerId);
 
