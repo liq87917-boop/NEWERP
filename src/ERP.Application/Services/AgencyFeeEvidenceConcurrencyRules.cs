@@ -39,13 +39,21 @@ public static class AgencyFeeEvidenceConcurrencyRules
 {
     /// <summary>锁序口径文案（接口 / 文档同源）。</summary>
     public const string GlobalLockOrderText =
-        "ERP-519 唯一确定性锁序：代理服务费协议证据行（AgencyServiceFeeAgreements，同一 Id）→ 由持有该行锁的事务顺带写入证据字段；"
-        + "更下游的对账单证据行 / 收款分摊证据行 / 收款单行锁（ERP-520 / ERP-521）只允许在该协议行锁之后获取，绝不反向获取。"
-        + "所有调用方都按此顺序加锁，以求「条件判定 + 写入」原子并把同一协议的草稿修改 / 登记 / 作废竞争串行化。";
+        "ERP-519 / ERP-520 唯一确定性锁序：① 代理服务费协议证据行（AgencyServiceFeeAgreements，同一 Id）→ "
+        + "② 代理服务费对账单证据行（AgencyServiceFeeStatements，同一 Id，ERP-520）；更下游的收款分摊证据行 / "
+        + "收款单行锁（ERP-521）只允许在对账单证据行锁之后获取。同一事务需要同时锁定多级证据行时，只能按此顺序加锁，"
+        + "绝不反向获取。所有调用方都按此顺序加锁，以求「条件判定 + 写入」原子并把同一协议的草稿修改 / 登记 / 作废竞争、"
+        + "同一对账单的草稿行替换 / 登记冻结 / 作废竞争串行化。";
 
     /// <summary>协议行锁的等价 T-SQL 形式（契约 / 文档同源；实际执行走 <see cref="LockAgreementRowAsync"/> 的审计时间戳刷新）。</summary>
     public const string AgreementRowLockSql =
         "SELECT [Id] FROM [db_owner].[AgencyServiceFeeAgreements] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {0}";
+
+    /// <summary>
+    /// 对账单行锁的等价 T-SQL 形式（ERP-520；契约 / 文档同源；实际执行走 <see cref="LockStatementRowAsync"/> 的审计时间戳刷新）。
+    /// </summary>
+    public const string StatementRowLockSql =
+        "SELECT [Id] FROM [db_owner].[AgencyServiceFeeStatements] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {0}";
 
     /// <summary>边界文案（不新增权限 / 表列 / 索引，不改写既有业务记录与历史证据）。</summary>
     public const string BoundaryText =
@@ -62,6 +70,14 @@ public static class AgencyFeeEvidenceConcurrencyRules
     public const string ActiveIdentityConflictText =
         "同一客户与规范化协议号的未作废记录已存在（或已被并发登记）：重复协议被拒绝而不是静默合并或覆盖"
         + "（如需更正请先作废原记录再重新登记）";
+
+    /// <summary>
+    /// 对账单证据并发冲突（同一个「客户 + 规范化对账单号」或同一条服务来源的并发登记输家）的对外文案（ERP-520）：
+    /// 与上游 ERP-519 协议文案同口径，绝不暴露数据库内部细节。
+    /// </summary>
+    public const string StatementActiveEvidenceConflictText =
+        "同一客户与规范化对账单号、或同一服务来源的未作废记录已存在（或已被并发登记）："
+        + "重复对账单 / 重复计费证据被拒绝而不是静默合并或覆盖（如需更正请先作废原对账单再重新登记）";
 
     /// <summary>行锁重试次数（乐观并发令牌过期时重读权威行后有界重试；行锁语义 = 阻塞后成功）。</summary>
     private const int RowLockRetryAttempts = 8;
@@ -197,10 +213,70 @@ public static class AgencyFeeEvidenceConcurrencyRules
         return null;
     }
 
+    /// <summary>
+    /// 对代理服务费<strong>对账单证据行</strong>加更新锁（ERP-520 唯一汇聚点）：把同一对账单并发的
+    /// 「草稿行替换 / 登记冻结 / 作废」串行化在同一事务内，使「权威状态与行读取 + 校验 + 写入」形成一个原子临界区。
+    /// 返回锁内重读的<strong>受跟踪权威实体</strong>；行已被并发软删除 / 不存在 → <c>null</c>
+    /// （由调用方按既有「不存在或已删除」受控错误处理）；非关系型提供程序跳过（返回 <c>null</c>）。
+    /// <para>锁序：只在对账单证据行上加锁；本任务不在对账单写路由内再取协议 / 来源 / 收款行锁，
+    /// 因此不存在交叉锁序（见 <see cref="GlobalLockOrderText"/>）。</para>
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatement?> LockStatementRowAsync(
+        IErpDbContext db, long statementId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (statementId <= 0) return null;
+        if (!IsRelationalProvider(db)) return null;
+
+        return await LockStatementRowCoreAsync(db, statementId);
+    }
+
+    /// <summary>
+    /// 对账单行锁核心：在调用方事务内「重读 → 刷新 <c>UpdatedAt</c> → 保存」以取得排它行锁（持有至事务结束），
+    /// 语义等价于 <see cref="StatementRowLockSql"/>。并发方先提交使本地乐观令牌过期时，重读权威行（含新令牌）
+    /// 后有界重试，绝不把纯粹的锁等待误报成业务拒绝；真实业务冲突仍由调用方的锁内校验判定。
+    /// </summary>
+    private static async Task<AgencyServiceFeeStatement?> LockStatementRowCoreAsync(
+        IErpDbContext db, long statementId)
+    {
+        for (var attempt = 1; attempt <= RowLockRetryAttempts; attempt++)
+        {
+            var statement = await db.AgencyServiceFeeStatements
+                .FirstOrDefaultAsync(x => x.Id == statementId && !x.IsDeleted);
+            if (statement is null) return null;
+
+            statement.UpdatedAt = DateTime.Now;
+            try
+            {
+                await db.SaveChangesAsync();
+                return statement;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                foreach (var entry in ex.Entries)
+                {
+                    try
+                    {
+                        await entry.ReloadAsync();
+                    }
+                    catch (DbUpdateConcurrencyException)
+                    {
+                        return null;   // 行已被并发软删除 / 删除：由调用方按既有「不存在或已删除」处理
+                    }
+                }
+
+                if (attempt == RowLockRetryAttempts)
+                    throw BusinessException.RuleConflict(ConcurrentModificationText);
+            }
+        }
+
+        return null;
+    }
+
     // ==================== 3. 受控写入 ====================
 
     /// <summary>
-    /// 保存代理服务费证据写入：把数据库层<strong>唯一索引冲突</strong>映射为<strong>稳定的业务重复错误</strong>
+    /// 保存代理服务费协议证据写入：把数据库层<strong>唯一索引冲突</strong>映射为<strong>稳定的业务重复错误</strong>
     /// （<c>Duplicate</c>），完整回滚由调用方在同一事务上执行（零部分写入）。
     /// <para><strong>绝不</strong>把 <c>SqlException</c> / 错误码 / 索引名 / 连接串等内部细节暴露给调用方；
     /// 非唯一性冲突（如结构缺失）原样上抛，不被误报成重复。</para>
@@ -215,6 +291,26 @@ public static class AgencyFeeEvidenceConcurrencyRules
         catch (DbUpdateException ex) when (LooksLikeUniqueViolation(ex))
         {
             throw BusinessException.Duplicate(ActiveIdentityConflictText);
+        }
+    }
+
+    /// <summary>
+    /// 保存代理服务费<strong>对账单证据</strong>写入（ERP-520：对账单表头与全部行）：把数据库层唯一索引冲突
+    /// （<c>UX_AgencyServiceFeeStatements_ActiveIdentity</c> / <c>UX_AgencyServiceFeeStatementLines_ActiveSource</c>）
+    /// 映射为对账单口径的<strong>稳定业务重复错误</strong>（<c>Duplicate</c>）；完整回滚由调用方在同一事务上执行
+    /// （零部分写入）。与 <see cref="SaveEvidenceAsync"/> 同口径：<strong>绝不</strong>把 <c>SqlException</c> /
+    /// 错误码 / 索引名 / 连接串等内部细节暴露给调用方，非唯一性冲突原样上抛。
+    /// </summary>
+    public static async Task SaveStatementEvidenceAsync(IErpDbContext db, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (LooksLikeUniqueViolation(ex))
+        {
+            throw BusinessException.Duplicate(StatementActiveEvidenceConflictText);
         }
     }
 

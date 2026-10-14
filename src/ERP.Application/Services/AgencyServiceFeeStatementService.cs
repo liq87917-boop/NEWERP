@@ -20,6 +20,12 @@ namespace ERP.Application.Services;
 /// 不物理删除、不静默改写；</item>
 /// <item><b>台账 / 详情读取</b>（<see cref="ListAsync"/> / <see cref="GetAsync"/>）：分页 / 有界，
 /// 客户、协议与行数**一次批量装载**，绝无逐行数据库查询。</item>
+/// <item><b>并发（ERP-520）</b>：修改 / 登记 / 作废都落在<strong>原子事务</strong>内，并在读取权威状态与行之前
+/// 先取<strong>同一把对账单行锁</strong>（<see cref="AgencyFeeEvidenceConcurrencyRules.LockStatementRowAsync"/>）；
+/// 锁内的权威表头 / 行、客户 / 协议资格、逐行来源资格才是唯一依据，因此「草稿行替换」与「登记冻结 / 作废」严格串行——
+/// 并发登记 / 作废只有唯一赢家，迟到的草稿替换一律被受控拒绝，冻结的合计与行集合完全一致，
+/// 零部分写入、零审计漂移；登记 / 作废冻结前会按登记口径重做一次权威校验（客户启用 / 协议已登记且客户币种一致 /
+/// 逐行来源仍可引用），任一行失效即整体回滚，历史证据与作废留痕不删除、不回填。</item>
 /// </list>
 /// <para>来源链接口径（关键）：行只按「来源类型 + 来源记录 Id」的**持久化标识符**引用来源，
 /// 本服务<strong>不</strong>按单号文本、金额、日期或相似度匹配 / 猜测任何来源。</para>
@@ -37,87 +43,134 @@ public static class AgencyServiceFeeStatementService
     /// <summary>来源候选单次返回上限（有界，避免一次拉全表）</summary>
     public const int MaxSourceOptions = AgencyServiceFeeStatementRules.MaxSourceOptions;
 
-    // ==================== 1. 登记 / 修改（仅草稿） ====================
+    // ==================== 1. 登记 / 修改（仅草稿；同一对账单行锁串行化） ====================
 
     /// <summary>
     /// 新增草稿对账单证据：校验对账单号 / 客户 / 协议资格与兼容性 / 对账日期 / 可选到期日 / 服务期间 /
     /// 每一条显式来源行（存在、未删除、未取消、客户与币种兼容）与行金额，写入客户与协议快照、行号与来源快照，
     /// 并在服务端计算合计；重复对账单身份与已被其它未作废对账单引用的来源都被拒绝。
+    /// <para>ERP-520：校验与「表头 + 全部行」插入落在**同一原子事务**内（被拒请求零写入、零身份 / 来源消耗）；
+    /// 并发同身份 / 同来源的登记由既有过滤唯一索引收敛，输家被映射为受控重复错误（绝不泄露数据库细节）。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> CreateAsync(
         IErpDbContext db, AgencyServiceFeeStatementSaveDto dto)
-    {
-        ArgumentNullException.ThrowIfNull(db);
-        ArgumentNullException.ThrowIfNull(dto);
-
-        var input = await ValidateAsync(db, dto);
-        await EnsureIdentityAvailableAsync(db, input, excludeStatementId: null);
-        await EnsureSourcesNotChargedAsync(db, input, excludeStatementId: null);
-
-        var statement = new AgencyServiceFeeStatement();
-        ApplyHeader(statement, input);
-
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        db.AgencyServiceFeeStatements.Add(statement);
-        await db.SaveChangesAsync();
-        db.AgencyServiceFeeStatementLines.AddRange(BuildLines(statement.Id, input));
-        await db.SaveChangesAsync();
-        await transaction.CommitAsync();
-
-        return await MapAsync(db, statement, includeLines: true);
-    }
+        => await CreateCoreAsync(db, dto, scope: null);
 
     /// <summary>
     /// 路由级登记草稿对账单（ERP-437）：<paramref name="scope"/> 非空时，显式提交的客户必须落在权威客户范围内；
     /// 越范围客户一律按同一条不披露存在性的错误在**写入之前**拒绝——绝不落任何对账单表头或行，
     /// 也绝不消耗任何对账单身份 / 来源占用。
+    /// <para>ERP-520：范围预检之后，核心写入仍在同一事务内把范围重新施加到**权威客户**（锁外读取不被信任）。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> CreateAsync(
         IErpDbContext db, AgencyServiceFeeStatementSaveDto dto, SalespersonDataScope? scope)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
-        if (scope is not null && dto.CustomerId > 0 && !scope.AllowsCustomer(dto.CustomerId))
-            throw BusinessException.NotFound(AgencyServiceFeeReconciliationRules.RegisterNotFoundText);
-        return await CreateAsync(db, dto);
+        if (scope is not null && dto.CustomerId > 0)
+            AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, dto.CustomerId);
+        return await CreateCoreAsync(db, dto, scope);
+    }
+
+    /// <summary>
+    /// 登记核心（ERP-520）：同一原子事务 → 校验（客户 / 协议资格与兼容性 / 逐行来源与金额）→ 身份唯一与来源占用
+    /// → 表头 + 全部行一次提交。任一步失败整体回滚并丢弃半成品变更（零部分写入、零身份 / 来源消耗）。
+    /// </summary>
+    private static async Task<AgencyServiceFeeStatementDto> CreateCoreAsync(
+        IErpDbContext db, AgencyServiceFeeStatementSaveDto dto, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+
+        await using var transaction = await AgencyFeeEvidenceConcurrencyRules.BeginMutationTransactionAsync(db);
+        AgencyServiceFeeStatement statement = null!;
+        try
+        {
+            var input = await ValidateAsync(db, dto);
+            if (scope is not null)
+                AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, input.Customer.Id);
+            await EnsureIdentityAvailableAsync(db, input, excludeStatementId: null);
+            await EnsureSourcesNotChargedAsync(db, input, excludeStatementId: null);
+
+            statement = new AgencyServiceFeeStatement();
+            ApplyHeader(statement, input);
+
+            db.AgencyServiceFeeStatements.Add(statement);
+            await AgencyFeeEvidenceConcurrencyRules.SaveStatementEvidenceAsync(db);
+            db.AgencyServiceFeeStatementLines.AddRange(BuildLines(statement.Id, input));
+            await AgencyFeeEvidenceConcurrencyRules.SaveStatementEvidenceAsync(db);
+            await AgencyFeeEvidenceConcurrencyRules.CommitAsync(transaction);
+        }
+        catch
+        {
+            await AgencyFeeEvidenceConcurrencyRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
+
+        return await MapAsync(db, statement, includeLines: true);
     }
 
     /// <summary>
     /// 修改草稿对账单证据：已登记 / 已作废拒绝修改（保留可读）；原草稿行按**软删除**替换（草稿尚未构成证据，
     /// 但也不做物理删除），新行重新校验客户 / 币种兼容性与来源唯一性，合计在服务端重算；
     /// 修改不会触碰登记人 / 登记时间（草稿尚未登记时它们为空）。
+    /// <para>ERP-520：同一原子事务内先取**同一把对账单行锁**，锁内重读权威状态与全部行后才判定可编辑性并整行替换，
+    /// 因此「并发登记 / 作废」与草稿替换严格串行——已登记 / 已作废证据绝不会再接收迟到的草稿行替换，
+    /// 冻结合计与行集合永远一致。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> UpdateAsync(
         IErpDbContext db, long statementId, AgencyServiceFeeStatementSaveDto dto)
+        => await UpdateCoreAsync(db, statementId, dto, scope: null);
+
+    /// <summary>
+    /// 修改核心（ERP-520）：同一事务 + 同一对账单行锁 → 锁内重读权威状态 / 客户范围 → 校验 → 整行替换
+    /// （原行软删除 + 新行插入）与表头快照 / 合计在**同一提交**内落库；任一步失败整体回滚并丢弃半成品变更
+    /// （零部分写入、零审计漂移）。
+    /// </summary>
+    private static async Task<AgencyServiceFeeStatementDto> UpdateCoreAsync(
+        IErpDbContext db, long statementId, AgencyServiceFeeStatementSaveDto dto, SalespersonDataScope? scope)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
         if (statementId <= 0) throw BusinessException.InvalidParameter("请选择要修改的代理服务费对账单");
 
-        var statement = await LoadAsync(db, statementId);
-        AgencyServiceFeeStatementRules.EnsureEditable(statement.Status, IdentityOf(statement));
-
-        var input = await ValidateAsync(db, dto);
-        await EnsureIdentityAvailableAsync(db, input, statement.Id);
-        await EnsureSourcesNotChargedAsync(db, input, statement.Id);
-
-        var existingLines = await db.AgencyServiceFeeStatementLines
-            .Where(l => l.StatementId == statement.Id && !l.IsDeleted)
-            .ToListAsync();
-        foreach (var line in existingLines)
+        await using var transaction = await AgencyFeeEvidenceConcurrencyRules.BeginMutationTransactionAsync(db);
+        AgencyServiceFeeStatement statement = null!;
+        try
         {
-            // 草稿行被替换：软删除（保留可审计痕迹），不作物理删除、不静默改写
-            line.IsDeleted = true;
-            line.UpdatedAt = DateTime.Now;
+            // ERP-520：先取同一把对账单行锁；锁内权威状态与范围才是唯一依据（加锁前的读取不被信任）。
+            statement = await LockStatementAuthoritativeAsync(db, statementId);
+            AgencyServiceFeeStatementRules.EnsureEditable(statement.Status, IdentityOf(statement));
+            EnsureAuthoritativeScope(scope, statement);
+
+            var input = await ValidateAsync(db, dto);
+            if (scope is not null)
+                AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, input.Customer.Id);
+            await EnsureIdentityAvailableAsync(db, input, statement.Id);
+            await EnsureSourcesNotChargedAsync(db, input, statement.Id);
+
+            var existingLines = await db.AgencyServiceFeeStatementLines
+                .Where(l => l.StatementId == statement.Id && !l.IsDeleted)
+                .ToListAsync();
+            foreach (var line in existingLines)
+            {
+                // 草稿行被替换：软删除（保留可审计痕迹），不作物理删除、不静默改写
+                line.IsDeleted = true;
+                line.UpdatedAt = DateTime.Now;
+            }
+
+            ApplyHeader(statement, input);
+            statement.UpdatedAt = DateTime.Now;
+
+            db.AgencyServiceFeeStatementLines.AddRange(BuildLines(statement.Id, input));
+            await AgencyFeeEvidenceConcurrencyRules.SaveStatementEvidenceAsync(db);
+            await AgencyFeeEvidenceConcurrencyRules.CommitAsync(transaction);
         }
-
-        ApplyHeader(statement, input);
-        statement.UpdatedAt = DateTime.Now;
-
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        db.AgencyServiceFeeStatementLines.AddRange(BuildLines(statement.Id, input));
-        await db.SaveChangesAsync();
-        await transaction.CommitAsync();
+        catch
+        {
+            await AgencyFeeEvidenceConcurrencyRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
 
         return await MapAsync(db, statement, includeLines: true);
     }
@@ -382,6 +435,8 @@ public static class AgencyServiceFeeStatementService
     /// 路由级修改草稿对账单（ERP-437）：<paramref name="scope"/> 非空时先按**已存**对账单的持久化客户与
     /// 显式提交的客户双向复核权威范围；越范围 / 已删除 / 不存在一律同一条不披露错误，
     /// 被拒请求绝不改写任何对账单表头或行。
+    /// <para>ERP-520：范围预检之后，核心写入仍在同一事务 + 同一对账单行锁内把范围重新施加到**权威行**
+    /// （并发归属变化 / 缓存范围都不被信任），并以受控不披露存在性的错误拒绝。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> UpdateAsync(
         IErpDbContext db, long statementId, AgencyServiceFeeStatementSaveDto dto, SalespersonDataScope? scope)
@@ -396,12 +451,14 @@ public static class AgencyServiceFeeStatementService
                 AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, dto.CustomerId);
         }
 
-        return await UpdateAsync(db, statementId, dto);
+        return await UpdateCoreAsync(db, statementId, dto, scope);
     }
 
     /// <summary>
     /// 路由级登记对账单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
     /// 越范围 / 已删除 / 不存在一律同一条不披露错误，拒绝发生在**冻结表头与行之前**——状态、字段与审计不变。
+    /// <para>ERP-520：范围预检之后，冻结仍在同一事务 + 同一对账单行锁内把范围重新施加到**权威行**
+    /// （绝不信任加锁前的读取），因此并发归属变化不会被旧的授权快照掩盖。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> RecordAsync(
         IErpDbContext db, long statementId, string? recordedByName, SalespersonDataScope? scope)
@@ -409,7 +466,7 @@ public static class AgencyServiceFeeStatementService
         ArgumentNullException.ThrowIfNull(db);
         if (scope is not null && statementId > 0)
             await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
-        return await RecordAsync(db, statementId, recordedByName);
+        return await RecordCoreAsync(db, statementId, recordedByName, scope);
     }
 
     /// <summary>
@@ -420,35 +477,65 @@ public static class AgencyServiceFeeStatementService
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> RecordAsync(
         IErpDbContext db, long statementId, string? recordedBy)
+        => await RecordCoreAsync(db, statementId, recordedBy, scope: null);
+
+    /// <summary>
+    /// 登记核心（ERP-520）：同一事务 + 同一对账单行锁 → 锁内重读权威状态（草稿资格）与客户范围 →
+    /// 按登记口径重做一次权威校验（客户启用 / 协议已登记且客户币种一致 / 逐行来源仍可引用 / 行金额仍合法，
+    /// 合计由服务端按已校验行重算）→ 冻结状态 / 登记人 / 时间戳与全部行。并发重复登记只有唯一赢家：
+    /// 输家在锁内读到「已登记」一律拒绝，绝不覆盖赢家已写入的登记人与时间戳；任一行在登记时已失效即整体回滚
+    /// （零部分冻结：表头保持草稿、合计与全部行状态不变）。
+    /// </summary>
+    private static async Task<AgencyServiceFeeStatementDto> RecordCoreAsync(
+        IErpDbContext db, long statementId, string? recordedBy, SalespersonDataScope? scope)
     {
         ArgumentNullException.ThrowIfNull(db);
-        var statement = await LoadAsync(db, statementId);
-        AgencyServiceFeeStatementRules.EnsureRecordable(statement.Status, IdentityOf(statement));
+        if (statementId <= 0) throw BusinessException.InvalidParameter("请选择要登记的代理服务费对账单");
 
-        var lines = await db.AgencyServiceFeeStatementLines
-            .Where(l => l.StatementId == statement.Id && !l.IsDeleted)
-            .ToListAsync();
-        AgencyServiceFeeStatementRules.EnsureLineCountWithinLimit(lines.Count);
-
-        var now = DateTime.Now;
-        var recordedByName = AgencyServiceFeeStatementRules.NormalizeRecordedBy(recordedBy);
-
-        statement.TotalAmount = AgencyServiceFeeStatementRules.ComputeTotal(
-            lines.Select(l => l.Amount), statement.Currency);
-        statement.Status = AgencyServiceFeeStatementRules.StatusRecorded;
-        statement.RecordedAt = now;
-        statement.RecordedBy = recordedByName;
-        statement.UpdatedAt = now;
-
-        foreach (var line in lines)
+        await using var transaction = await AgencyFeeEvidenceConcurrencyRules.BeginMutationTransactionAsync(db);
+        AgencyServiceFeeStatement statement = null!;
+        try
         {
-            line.Status = AgencyServiceFeeStatementRules.StatusRecorded;
-            line.RecordedAt = now;
-            line.RecordedBy = recordedByName;
-            line.UpdatedAt = now;
-        }
+            // ERP-520：先取同一把对账单行锁；锁内重读的权威状态才是登记资格与客户范围的唯一依据。
+            statement = await LockStatementAuthoritativeAsync(db, statementId);
+            AgencyServiceFeeStatementRules.EnsureRecordable(statement.Status, IdentityOf(statement));
+            EnsureAuthoritativeScope(scope, statement);
 
-        await db.SaveChangesAsync();
+            var lines = await db.AgencyServiceFeeStatementLines
+                .Where(l => l.StatementId == statement.Id && !l.IsDeleted)
+                .ToListAsync();
+            AgencyServiceFeeStatementRules.EnsureLineCountWithinLimit(lines.Count);
+
+            // ERP-520：冻结**之前**，把已持久化表头与全部行按登记口径重做一次权威校验——客户仍启用、
+            // 协议仍为「已登记」且客户 / 币种一致、逐行来源仍可引用、行金额仍合法；合计由服务端按已校验行重算。
+            // 任一失效即受控拒绝并整体回滚，绝不冻结过期的合计或失效的来源引用（零部分冻结、零状态漂移）。
+            var revalidated = await ValidateAsync(db, BuildPersistedSaveDto(statement, lines));
+
+            var now = DateTime.Now;
+            var recordedByName = AgencyServiceFeeStatementRules.NormalizeRecordedBy(recordedBy);
+
+            statement.TotalAmount = revalidated.TotalAmount;
+            statement.Status = AgencyServiceFeeStatementRules.StatusRecorded;
+            statement.RecordedAt = now;
+            statement.RecordedBy = recordedByName;
+            statement.UpdatedAt = now;
+
+            foreach (var line in lines)
+            {
+                line.Status = AgencyServiceFeeStatementRules.StatusRecorded;
+                line.RecordedAt = now;
+                line.RecordedBy = recordedByName;
+                line.UpdatedAt = now;
+            }
+
+            await AgencyFeeEvidenceConcurrencyRules.SaveStatementEvidenceAsync(db);
+            await AgencyFeeEvidenceConcurrencyRules.CommitAsync(transaction);
+        }
+        catch
+        {
+            await AgencyFeeEvidenceConcurrencyRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
 
         return await MapAsync(db, statement, includeLines: true);
     }
@@ -456,6 +543,8 @@ public static class AgencyServiceFeeStatementService
     /// <summary>
     /// 路由级作废对账单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
     /// 越范围 / 已删除 / 不存在一律同一条不披露错误，拒绝发生在**改写状态之前**——原始行、来源快照与审计不变。
+    /// <para>ERP-520：范围预检之后，作废仍在同一事务 + 同一对账单行锁内把范围重新施加到**权威行**；
+    /// 表头与全部行的作废状态 / 原因 / 时间戳在**同一提交**内落库（要么全冻结作废，要么逐字段不变）。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> VoidAsync(
         IErpDbContext db, long statementId, string? reason, SalespersonDataScope? scope)
@@ -463,7 +552,7 @@ public static class AgencyServiceFeeStatementService
         ArgumentNullException.ThrowIfNull(db);
         if (scope is not null && statementId > 0)
             await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
-        return await VoidAsync(db, statementId, reason);
+        return await VoidCoreAsync(db, statementId, reason, scope);
     }
 
     /// <summary>
@@ -473,31 +562,55 @@ public static class AgencyServiceFeeStatementService
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> VoidAsync(
         IErpDbContext db, long statementId, string? reason)
+        => await VoidCoreAsync(db, statementId, reason, scope: null);
+
+    /// <summary>
+    /// 作废核心（ERP-520）：同一事务 + 同一对账单行锁 → 锁内重读权威状态后判定可作废性 → 写入作废状态 /
+    /// 原因 / 时间戳与全部行。并发「登记 vs 作废」只有唯一赢家：输家在锁内读到最新权威状态一律受控拒绝，
+    /// 绝不覆盖赢家已冻结 / 已作废的字段与时间戳；被拒请求整体回滚（零部分写入、零审计漂移）。
+    /// </summary>
+    private static async Task<AgencyServiceFeeStatementDto> VoidCoreAsync(
+        IErpDbContext db, long statementId, string? reason, SalespersonDataScope? scope)
     {
         ArgumentNullException.ThrowIfNull(db);
-        var statement = await LoadAsync(db, statementId);
-        AgencyServiceFeeStatementRules.EnsureVoidable(statement.Status, IdentityOf(statement));
-        var reasonText = AgencyServiceFeeStatementRules.NormalizeVoidReason(reason);
+        if (statementId <= 0) throw BusinessException.InvalidParameter("请选择要作废的代理服务费对账单");
 
-        var lines = await db.AgencyServiceFeeStatementLines
-            .Where(l => l.StatementId == statement.Id && !l.IsDeleted)
-            .ToListAsync();
-
-        var now = DateTime.Now;
-        statement.Status = AgencyServiceFeeStatementRules.StatusVoided;
-        statement.VoidedAt = now;
-        statement.VoidReason = reasonText;
-        statement.UpdatedAt = now;
-
-        foreach (var line in lines)
+        await using var transaction = await AgencyFeeEvidenceConcurrencyRules.BeginMutationTransactionAsync(db);
+        AgencyServiceFeeStatement statement = null!;
+        try
         {
-            line.Status = AgencyServiceFeeStatementRules.StatusVoided;
-            line.VoidedAt = now;
-            line.VoidReason = reasonText;
-            line.UpdatedAt = now;
-        }
+            // ERP-520：先取同一把对账单行锁；锁内权威状态决定可作废性，客户范围同样在锁内重新施加。
+            statement = await LockStatementAuthoritativeAsync(db, statementId);
+            AgencyServiceFeeStatementRules.EnsureVoidable(statement.Status, IdentityOf(statement));
+            EnsureAuthoritativeScope(scope, statement);
+            var reasonText = AgencyServiceFeeStatementRules.NormalizeVoidReason(reason);
 
-        await db.SaveChangesAsync();
+            var lines = await db.AgencyServiceFeeStatementLines
+                .Where(l => l.StatementId == statement.Id && !l.IsDeleted)
+                .ToListAsync();
+
+            var now = DateTime.Now;
+            statement.Status = AgencyServiceFeeStatementRules.StatusVoided;
+            statement.VoidedAt = now;
+            statement.VoidReason = reasonText;
+            statement.UpdatedAt = now;
+
+            foreach (var line in lines)
+            {
+                line.Status = AgencyServiceFeeStatementRules.StatusVoided;
+                line.VoidedAt = now;
+                line.VoidReason = reasonText;
+                line.UpdatedAt = now;
+            }
+
+            await AgencyFeeEvidenceConcurrencyRules.SaveStatementEvidenceAsync(db);
+            await AgencyFeeEvidenceConcurrencyRules.CommitAsync(transaction);
+        }
+        catch
+        {
+            await AgencyFeeEvidenceConcurrencyRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
 
         return await MapAsync(db, statement, includeLines: true);
     }
@@ -859,6 +972,69 @@ public static class AgencyServiceFeeStatementService
         return await db.AgencyServiceFeeStatements
                    .FirstOrDefaultAsync(x => x.Id == statementId && !x.IsDeleted)
                ?? throw BusinessException.NotFound($"代理服务费对账单证据（Id={statementId}）不存在或已删除");
+    }
+
+    /// <summary>
+    /// ERP-520：取**同一把对账单行锁**并返回锁内重读的受跟踪权威实体。关系型后端在调用方事务内对对账单行发出
+    /// 排它行锁（阻塞至并发事务提交后重读，语义等价 <c>SELECT ... WITH (UPDLOCK, HOLDLOCK)</c>）；
+    /// 非关系型提供程序无行锁语义（等价无操作），直接按 Id 装载。行已被并发软删除 / 不存在 →
+    /// 既有「不存在或已删除」受控错误（由 <see cref="LoadAsync"/> 给出，不新增错误口径）。
+    /// </summary>
+    private static async Task<AgencyServiceFeeStatement> LockStatementAuthoritativeAsync(
+        IErpDbContext db, long statementId)
+    {
+        var locked = await AgencyFeeEvidenceConcurrencyRules.LockStatementRowAsync(db, statementId);
+        return locked ?? await LoadAsync(db, statementId);
+    }
+
+    /// <summary>
+    /// ERP-520：在锁内把已解析的客户数据范围重新施加到**权威行**（绝不信任加锁前的读取）；越范围 / 已删除 /
+    /// 不存在一律返回同一条不披露存在性的受控错误，且拒绝发生在任何字段 / 状态写入之前。进程内无范围的直调
+    /// （<paramref name="scope"/> 为 <c>null</c>）保持既有免范围口径（不新增授权）。
+    /// </summary>
+    private static void EnsureAuthoritativeScope(
+        SalespersonDataScope? scope, AgencyServiceFeeStatement statement)
+    {
+        if (scope is not null)
+            AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, statement.CustomerId);
+    }
+
+    /// <summary>
+    /// 把**已持久化**对账单表头与全部行投影为登记口径的校验请求（只读：不写入、不改写任何字段），
+    /// 供登记冻结前复用 <see cref="ValidateAsync"/> 做一次权威复校（客户 / 协议资格与兼容性 / 逐行来源资格与金额）。
+    /// 行按行号排序，服务端合计由 <see cref="ValidateAsync"/> 重算，绝不采信历史快照里的合计。
+    /// </summary>
+    private static AgencyServiceFeeStatementSaveDto BuildPersistedSaveDto(
+        AgencyServiceFeeStatement statement, IReadOnlyList<AgencyServiceFeeStatementLine> lines)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(lines);
+
+        return new AgencyServiceFeeStatementSaveDto
+        {
+            StatementNo = statement.StatementNo,
+            CustomerId = statement.CustomerId,
+            Currency = statement.Currency,
+            StatementDate = statement.StatementDate,
+            DueDate = statement.DueDate,
+            ServicePeriodFrom = statement.ServicePeriodFrom,
+            ServicePeriodTo = statement.ServicePeriodTo,
+            AgreementId = statement.AgreementId,
+            Remark = statement.Remark,
+            Lines = lines
+                .OrderBy(l => l.LineNo).ThenBy(l => l.Id)
+                .Select(l => new AgencyServiceFeeStatementLineSaveDto
+                {
+                    SourceType = l.SourceType,
+                    SourceId = l.SourceId,
+                    Description = l.Description,
+                    BasisQuantity = l.BasisQuantity,
+                    BasisNote = l.BasisNote,
+                    Amount = l.Amount,
+                    Remark = l.Remark
+                })
+                .ToList()
+        };
     }
 
     /// <summary>对账单对外身份文案（提示与台账共用；与唯一性判定口径一致）</summary>
