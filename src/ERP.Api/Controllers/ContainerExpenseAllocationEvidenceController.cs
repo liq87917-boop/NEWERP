@@ -19,6 +19,10 @@ namespace ERP.Api.Controllers;
 /// 分摊批次与分摊行 / 费用单 / 结算单 / 客户主数据，不记账、不生成凭证 / 收款 / 付款 / 结算单，
 /// 也不回填任何历史留痕；缺失证据一律显示「无（未登记）」或「未知」，绝不推断为零费用、已结算、
 /// 应收、应付或客户对账结论。</para>
+/// <para><b>标量存储边界（ERP-512）</b>：本模块是**只读**派生，不调用写入侧的派生标量守卫
+/// （<c>EnsureConvertedToCnyRepresentable</c> / <c>EnsureStoredExpenseScalarsRepresentable</c>），
+/// 折人民币回显继续沿用纯计算口径（<c>ConvertToCny</c>）：历史 / 已作废批次与费用单始终保持可读，
+/// 不因新的写入边界被拒、也不触发任何自动更正。</para>
 /// </summary>
 [ApiController]
 [Route("api/container/expense-allocation-evidence")]

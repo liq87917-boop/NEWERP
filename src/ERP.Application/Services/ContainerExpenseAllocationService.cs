@@ -351,6 +351,11 @@ public static class ContainerExpenseAllocationService
         if (source is null) throw BusinessException.NotFound("来源费用单不存在或已删除，不能作为分摊来源");
         ExpenseAuthorizationRules.EnsureStoredExpenseScopeAllowed(scope, source);
 
+        // ERP-512：来源费用**已存储**的标量（金额 / 汇率 / 折人民币金额）必须先能在实际列精度内表示 ——
+        // 历史或被外部改写的越界来源在这里受控拒绝（预览与生成共用同一入口），
+        // 绝不静默截断 / 取整，也绝不回写或改写任何历史行。
+        ExpenseAuthorizationRules.EnsureStoredExpenseScalarsRepresentable(source);
+
         var participants = await ContainerLoadingParticipantService.ListAsync(
             db, request.LoadingListId, activeOnly: true);
         if (participants.Count == 0)
@@ -417,12 +422,30 @@ public static class ContainerExpenseAllocationService
         IReadOnlyList<ContainerExpenseAllocationRules.AllocationShare> shares)
     {
         var currency = ContainerExpenseAllocationRules.NormalizeCurrency(source.Currency);
+        var exchangeRate = source.ExchangeRate <= 0 ? 1m : source.ExchangeRate;
+        var totalBasis = inputs.Sum(i => i.BasisValue);
         var lines = new List<ContainerExpenseAllocationLineDto>(shares.Count);
         var sort = 0;
 
         foreach (var share in shares)
         {
             var participant = participants.Single(p => p.Id == share.ParticipantId);
+
+            // ERP-512：逐行派生标量（基数值 / 比例 / 分摊金额 / 折人民币金额）在**任何单号预约 / 写入之前**
+            // 收敛到各自实际列精度（DECIMAL(18,4) / DECIMAL(18,2)），越界或乘法溢出即整批受控拒绝。
+            FinancePersistedAmountRules.EnsureWithinDecimal18(
+                share.BasisValue, FinancePersistedAmountRules.DecimalScale4,
+                ContainerExpenseAllocationRules.BasisValueLabel);
+            FinancePersistedAmountRules.EnsureWithinDecimal18(
+                share.Ratio, FinancePersistedAmountRules.DecimalScale4,
+                ContainerExpenseAllocationRules.RatioLabel);
+            FinancePersistedAmountRules.EnsureWithinDecimal18(
+                share.AllocatedAmount, FinancePersistedAmountRules.DecimalScale,
+                ContainerExpenseAllocationRules.AllocatedAmountLabel);
+
+            var allocatedAmountCny = ContainerExpenseAllocationRules.EnsureConvertedToCnyRepresentable(
+                share.AllocatedAmount, currency, exchangeRate);
+
             lines.Add(new ContainerExpenseAllocationLineDto(
                 participant.Id,
                 participant.CustomerId,
@@ -440,7 +463,7 @@ public static class ContainerExpenseAllocationService
                 ContainerExpenseAllocationRules.BasisEvidenceText(method, basisKind),
                 share.Ratio,
                 share.AllocatedAmount,
-                ContainerExpenseAllocationRules.ConvertToCny(share.AllocatedAmount, currency, source.ExchangeRate),
+                allocatedAmountCny,
                 currency,
                 share.RemainderCarrier,
                 null,
@@ -449,9 +472,20 @@ public static class ContainerExpenseAllocationService
         }
 
         var allocatedTotal = lines.Sum(l => l.AllocatedAmount);
-        var totalBasis = inputs.Sum(i => i.BasisValue);
-        var exactTotal = shares.Sum(s => ContainerExpenseAllocationRules.RoundAmount(
-            source.Amount * s.BasisValue / totalBasis, currency));
+        var exactTotal = shares.Sum(s => ContainerExpenseAllocationRules.ExactShareAmount(
+            source.Amount, s.BasisValue, totalBasis, currency));
+
+        // ERP-512：表头派生标量（来源金额 / 分摊合计 / 汇率）同样在计划返回（= 生成写入）之前收敛到各自实际列精度；
+        // 预览与生成共用本计划，因此「预览所示即生成结果」在存储边界上同样成立。
+        FinancePersistedAmountRules.EnsureWithinDecimal18(
+            source.Amount, FinancePersistedAmountRules.DecimalScale,
+            ContainerExpenseAllocationRules.SourceAmountLabel);
+        FinancePersistedAmountRules.EnsureWithinDecimal18(
+            allocatedTotal, FinancePersistedAmountRules.DecimalScale,
+            ContainerExpenseAllocationRules.AllocatedTotalLabel);
+        FinancePersistedAmountRules.EnsureWithinDecimal18(
+            exchangeRate, FinancePersistedAmountRules.DecimalScale6,
+            ContainerExpenseAllocationRules.ExchangeRateLabel);
 
         var scopeText = ContainerExpenseAllocationRules.IsWholeContainer(method)
             ? $"整柜法：全额归参与方「{lines[0].CustomerDisplay}」；基数 = 装柜清单持久化"
@@ -463,7 +497,7 @@ public static class ContainerExpenseAllocationService
             source.ExpenseNo ?? string.Empty,
             source.ExpenseType ?? string.Empty,
             source.Amount,
-            ContainerExpenseAllocationRules.ConvertToCny(source.Amount, currency, source.ExchangeRate),
+            ContainerExpenseAllocationRules.EnsureConvertedToCnyRepresentable(source.Amount, currency, exchangeRate),
             currency,
             ContainerExpenseAllocationRules.PrecisionOf(currency),
             source.RefType ?? string.Empty,

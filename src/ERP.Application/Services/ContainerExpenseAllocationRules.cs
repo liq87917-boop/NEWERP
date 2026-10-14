@@ -82,6 +82,27 @@ public static class ContainerExpenseAllocationRules
     /// <summary>折人民币固定 2 位小数（与既有 <see cref="FinanceExpense.AmountCny"/> 口径一致）</summary>
     public const int CnyDecimals = 2;
 
+    /// <summary>折人民币金额列（<c>AmountCny</c> / <c>AllocatedAmountCny</c>，DECIMAL(18,2)）超界文案前缀</summary>
+    public const string CnyAmountLabel = "折人民币金额";
+
+    /// <summary>分摊金额列（<c>AllocatedAmount</c>，DECIMAL(18,2)）超界文案前缀</summary>
+    public const string AllocatedAmountLabel = "分摊金额";
+
+    /// <summary>分摊比例列（<c>Ratio</c>，DECIMAL(18,4)）超界文案前缀</summary>
+    public const string RatioLabel = "分摊比例";
+
+    /// <summary>分摊基数值列（<c>BasisValue</c>，DECIMAL(18,4)）超界文案前缀</summary>
+    public const string BasisValueLabel = "分摊基数值";
+
+    /// <summary>表头来源金额列（<c>SourceAmount</c>，DECIMAL(18,2)）超界文案前缀</summary>
+    public const string SourceAmountLabel = "来源费用金额";
+
+    /// <summary>表头分摊合计列（<c>AllocatedTotal</c>，DECIMAL(18,2)）超界文案前缀</summary>
+    public const string AllocatedTotalLabel = "分摊行合计金额";
+
+    /// <summary>表头汇率列（<c>ExchangeRate</c>，DECIMAL(18,6)）超界文案前缀</summary>
+    public const string ExchangeRateLabel = "分摊批次汇率";
+
     /// <summary>余差归属规则文案（预览与文档共用，避免界面与后端口径不一致）</summary>
     public const string RemainderRuleText =
         "分摊金额按币种精度四舍五入（0.5 进位）；四舍五入产生的余差归「基准值最大」的参与方，"
@@ -138,6 +159,22 @@ public static class ContainerExpenseAllocationRules
         return NormalizeCurrency(currency) == "CNY"
             ? RoundAmount(amount, "CNY")
             : Math.Round(amount * rate, CnyDecimals, MidpointRounding.AwayFromZero);
+    }
+
+    /// <summary>
+    /// 折人民币**派生值**的实际列精度边界（ERP-512）：结果必须在 <c>AmountCny / AllocatedAmountCny</c> 实际列精度
+    /// <c>DECIMAL(18,2)</c> 内可表示；CNY 原样取整、其余币种先做受控乘法（<see cref="FinancePersistedAmountRules.MultiplyScalar"/>，
+    /// 溢出即受控拒绝，绝不以 <see cref="OverflowException"/> 崩溃）。
+    /// <para>预览与生成共用本入口；只读派生（分摊证据 / 台账回显）继续沿用纯计算 <see cref="ConvertToCny"/>，
+    /// 因此历史读取不会被写入边界影响。</para>
+    /// </summary>
+    public static decimal EnsureConvertedToCnyRepresentable(decimal amount, string? currency, decimal exchangeRate)
+    {
+        var rate = exchangeRate <= 0 ? 1m : exchangeRate;
+        return NormalizeCurrency(currency) == "CNY"
+            ? FinancePersistedAmountRules.EnsureWithinDecimal18(
+                RoundAmount(amount, "CNY"), CnyDecimals, CnyAmountLabel)
+            : FinancePersistedAmountRules.MultiplyScalar(amount, rate, CnyDecimals, CnyAmountLabel);
     }
 
     // ==================== 2. 方法与基数口径 ====================
@@ -246,6 +283,14 @@ public static class ContainerExpenseAllocationRules
             throw BusinessException.InvalidParameter(
                 $"参与方 {string.Join("、", negative)} 的基准值为负数：基准值必须为非负数");
 
+        // ERP-512：来源金额与每个基准值先收敛到各自实际列精度（DECIMAL(18,2) / DECIMAL(18,4)），再求和 / 相乘 ——
+        // 既避免 SQL 截断，也让极大基准值在任何 Db.Add 之前被受控拒绝（绝不静默截断、绝不崩溃）。
+        FinancePersistedAmountRules.EnsureWithinDecimal18(
+            totalAmount, FinancePersistedAmountRules.DecimalScale, SourceAmountLabel);
+        foreach (var item in basis)
+            FinancePersistedAmountRules.EnsureWithinDecimal18(
+                item.BasisValue, FinancePersistedAmountRules.DecimalScale4, BasisValueLabel);
+
         var totalBasis = basis.Sum(b => b.BasisValue);
         if (totalBasis <= 0)
             throw BusinessException.InvalidParameter(
@@ -263,11 +308,14 @@ public static class ContainerExpenseAllocationRules
         foreach (var item in basis.OrderBy(b => b.ParticipantId))
         {
             if (item.ParticipantId == carrierId) continue;
-            var amount = RoundAmount(totalAmount * item.BasisValue / totalBasis, currency);
+            var amount = ExactShareAmount(totalAmount, item.BasisValue, totalBasis, currency);
+            FinancePersistedAmountRules.EnsureWithinDecimal18(
+                amount, FinancePersistedAmountRules.DecimalScale, AllocatedAmountLabel);
             assigned += amount;
-            shares.Add(new AllocationShare(
-                item.ParticipantId, item.BasisValue,
-                RoundRatio(item.BasisValue / totalBasis * 100m), amount, false));
+            var ratio = RoundRatio(item.BasisValue / totalBasis * 100m);
+            FinancePersistedAmountRules.EnsureWithinDecimal18(
+                ratio, FinancePersistedAmountRules.DecimalScale4, RatioLabel);
+            shares.Add(new AllocationShare(item.ParticipantId, item.BasisValue, ratio, amount, false));
         }
 
         var carrier = basis.Single(b => b.ParticipantId == carrierId);
@@ -275,12 +323,37 @@ public static class ContainerExpenseAllocationRules
         if (carrierAmount < 0)
             throw BusinessException.InvalidParameter(
                 $"币种「{NormalizeCurrency(currency)}」的金额精度无法让各行合计与来源金额一致，请调整基准值或改用其他币种精度口径");
+        FinancePersistedAmountRules.EnsureWithinDecimal18(
+            carrierAmount, FinancePersistedAmountRules.DecimalScale, AllocatedAmountLabel);
 
+        var carrierRatio = RoundRatio(carrier.BasisValue / totalBasis * 100m);
+        FinancePersistedAmountRules.EnsureWithinDecimal18(
+            carrierRatio, FinancePersistedAmountRules.DecimalScale4, RatioLabel);
         shares.Add(new AllocationShare(
-            carrierId, carrier.BasisValue,
-            RoundRatio(carrier.BasisValue / totalBasis * 100m), carrierAmount, true));
+            carrierId, carrier.BasisValue, carrierRatio, carrierAmount, true));
 
         return shares.OrderBy(s => s.ParticipantId).ToList();
+    }
+
+    /// <summary>
+    /// 单个参与方的**精确分摊份额**（保留既有「来源金额 × 基准值 ÷ 基准合计」的运算顺序与按币种精度取整口径）：
+    /// 仅当中间乘积本身超出十进制可表示范围（CLR 溢出）时改用等价的除法优先顺序 —— 绝不因中间量溢出而崩溃，
+    /// 也不改写分摊算法（正常取值路径逐位一致）；结果仍由调用方按实际列精度判定。
+    /// </summary>
+    public static decimal ExactShareAmount(
+        decimal totalAmount, decimal basisValue, decimal totalBasis, string? currency)
+    {
+        decimal share;
+        try
+        {
+            share = totalAmount * basisValue / totalBasis;
+        }
+        catch (OverflowException)
+        {
+            // 等价的除法优先顺序：先约简再相乘，避免中间乘积溢出（结果同样按币种精度取整）。
+            share = totalAmount / totalBasis * basisValue;
+        }
+        return RoundAmount(share, currency);
     }
 
     // ==================== 4. 来源费用可分摊资格 ====================

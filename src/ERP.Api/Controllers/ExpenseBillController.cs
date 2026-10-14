@@ -25,6 +25,10 @@ namespace ERP.Api.Controllers;
 /// 缺失 / 为零 / 未知 / 已删除身份一律受控未认证，禁用账号 / 缺少或被撤销既有菜单一律权限不足；
 /// 绝无匿名 / 管理员 / 环境 / 测试专用开关回退。契约见
 /// <see cref="ExpenseAuthorizationRules.PathIndependenceText"/>。</para>
+/// <para><b>标量实际列精度（ERP-512）</b>：费用 CRUD 的全部客户端可持久化标量（金额 / 汇率 / 折人民币金额 /
+/// 税率 / 税额 / 分摊比例 / 分摊金额）在既有取整之后必须能在实际列精度（<c>DECIMAL(18,2)</c>）内表示；
+/// 传统分摊与 ERP-042 批次的**派生**金额 / 比例 / 折人民币金额在单号生成与任何 <c>Db.Add</c> 之前预计算并校验，
+/// 越界 / 乘法溢出即整批受控拒绝（零单号消耗、零已跟踪行），绝不静默截断 / 取整，也不改写任何历史。</para>
 /// </summary>
 [ApiController]
 [Route("api/finance/expenses")]
@@ -79,7 +83,15 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         await EnsureLegacyAllocateRequestValidAsync(req, lockedScope, write: true);
 
         var expenseDate = (req.ExpenseDate ?? DateTime.Today).Date;
+
+        // ERP-512：派生金额（分摊金额 / 分摊比例 / 折人民币金额）在**单号生成与任何 Db.Add 之前**全部预计算
+        // 并校验到实际列精度（DECIMAL(18,2)）—— Calculate 是预览与生成共用的收敛边界。
+        // 任一越界 / 乘法溢出即整批受控拒绝：绝不占用单号、绝不留下部分已跟踪行、绝不改写任何既有数据。
         var allocated = Calculate(req);
+        var rate = req.ExchangeRate <= 0 ? 1m : req.ExchangeRate;
+        var plannedAmountsCny = allocated
+            .Select(item => ExpenseAuthorizationRules.DeriveCnyAmount(item.AllocatedAmount, req.Currency, rate))
+            .ToList();
 
         var exists = await _db.FinanceExpenses.AnyAsync(x => !x.IsDeleted
             && x.RefNo == req.RefNo && x.ExpenseType == req.ExpenseType && x.ExpenseDate.Date == expenseDate);
@@ -97,8 +109,9 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         if (maxNo is not null && int.TryParse(maxNo[prefix.Length..], out var n)) seq = n + 1;
 
         var created = 0;
-        foreach (var item in allocated)
+        for (var i = 0; i < allocated.Count; i++)
         {
+            var item = allocated[i];
             _db.FinanceExpenses.Add(new FinanceExpense
             {
                 ExpenseNo = $"{prefix}{seq:000}",
@@ -106,8 +119,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
                 ExpenseType = req.ExpenseType,
                 Amount = item.AllocatedAmount,
                 Currency = req.Currency,
-                ExchangeRate = req.ExchangeRate <= 0 ? 1 : req.ExchangeRate,
-                AmountCny = req.Currency == "CNY" ? item.AllocatedAmount : Math.Round(item.AllocatedAmount * req.ExchangeRate, 2),
+                ExchangeRate = rate,
+                AmountCny = plannedAmountsCny[i],
                 Payee = req.Payee,
                 RefType = req.RefType,
                 RefNo = req.RefNo,
@@ -429,7 +442,12 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
             ExpenseAuthorizationRules.EnsureCustomerInScope(scope, detail.CustomerId);
     }
 
-    /// <summary>分摊计算核心：按指定基数计算各客户权重、比例与分摊金额（末行补齐四舍五入差额）</summary>
+    /// <summary>
+    /// 分摊计算核心（预览与生成**共用**的派生边界）：按指定基数计算各客户权重、比例与分摊金额（末行补齐四舍五入差额）。
+    /// <para>ERP-512：分摊总额与每一行的派生标量（比例 / 分摊金额）在这里按实际列精度 <c>DECIMAL(18,2)</c> 收敛 ——
+    /// 越界、极大权重导致的乘法 / 求和溢出一律受控拒绝，绝不静默截断 / 取整，也不以 <see cref="OverflowException"/> 崩溃。
+    /// 预览与生成因此共享完全一致的边界（预览不会展示生成阶段必然被拒绝的结果）。</para>
+    /// </summary>
     private static List<ExpenseAllocateResultItem> Calculate(ExpenseAllocateRequest req)
     {
         var details = req.Details ?? new List<ExpenseAllocateDetail>();
@@ -445,7 +463,20 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         };
 
         var weights = details.Select(WeightOf).ToList();
-        var sum = weights.Sum();
+        decimal sum;
+        try
+        {
+            sum = weights.Sum();
+        }
+        catch (OverflowException)
+        {
+            throw BusinessException.InvalidParameter(
+                "分摊权重（体积 / 重量 / 箱数 / 金额）合计超出十进制可表示范围：请检查明细取值（绝不静默截断或取整）");
+        }
+
+        // 分摊总额同样先收敛到实际列精度（生成的行金额 / 折人民币金额都从它派生）。
+        ExpenseAuthorizationRules.EnsureScalarRepresentable(
+            req.TotalAmount, ExpenseAuthorizationRules.AmountOverflowLabel);
 
         // 权重全部为 0 时退化为"平均分摊"，避免除零并给出可用结果
         var items = new List<ExpenseAllocateResultItem>();
@@ -456,8 +487,16 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
             var ratio = sum > 0 ? Math.Round(weights[i] / sum * 100, 4) : Math.Round(100m / details.Count, 4);
             var amount = i == details.Count - 1
                 ? Math.Round(req.TotalAmount - assigned, 2)                       // 末行补齐差额
-                : Math.Round(req.TotalAmount * ratio / 100m, 2);
+                : Math.Round(
+                    FinancePersistedAmountRules.SafeMultiply(
+                        req.TotalAmount, ratio / 100m, ExpenseAuthorizationRules.AllocatedAmountOverflowLabel),
+                    2);
             assigned += amount;
+            ExpenseAuthorizationRules.EnsureAllocateResultRepresentable(ratio, amount);
+
+            // 折人民币派生（只校验、不写库）：与生成阶段共用同一收敛边界 ——
+            // 预览因此不会展示生成阶段必然被拒绝（越界 / 乘法溢出）的结果。
+            ExpenseAuthorizationRules.DeriveCnyAmount(amount, req.Currency, req.ExchangeRate);
 
             items.Add(new ExpenseAllocateResultItem
             {
