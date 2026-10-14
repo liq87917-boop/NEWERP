@@ -1,0 +1,105 @@
+{
+  "title": "Serialize agency agreement draft edits and evidence lifecycle transitions",
+  "description": "Close agency fee agreement frozen-evidence race. AgencyServiceFeeAgreementService.UpdateAsync loads/checks Draft then edits, while RecordAsync loads/checks and freezes status/audit without common transaction/row lock; VoidAsync similarly reads and writes unguarded. A draft edit can persist after another request records or voids evidence, or two registrations overwrite recorded audit. Add minimal shared AgencyFeeEvidenceConcurrencyRules through existing service/controller flow; use same agreement lock for update/record/void and re-read authoritative state/terms/authority under lock. Preserve create uniqueness and existing fee terms/currency boundaries. No statement generation, fee inference or new business authority. Preserve existing current identity/menu/customer scope and explicit source ownership; recheck in locked authoritative state without new grants. Reuse relational transaction/row-lock patterns from existing business services, ensure deterministic documented lock order and safe nested transaction handling. No schema/migration, microservice, new database, implicit fee calculation or accounting/receipt posting. Clear failed tracked changes on rejection as existing business patterns require; no partial state/rows/audit/snapshots. Historical reads and void evidence retained, no deletion/backfill of snapshots. Adapt necessary original fixtures genuinely with original assertions intact. All logs/TRX under .ai/logs/<task>, original failures retained. Mandatory true two-independent-connection SQL race tests using barriers/controlled ordering, never timing sleeps alone; fresh dedicated GUID NEWERP_AUTOTEST only, no drop/reset/reuse/production. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+    "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+    "docs/agency-agreement-concurrency.md",
+    "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+    "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+    "src/ERP.UnitTests/AgencyAgreementConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/AgencyAgreementConcurrencySqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Agreement update/record/void use same existing-entity lock and transaction, re-reading current status and live authority/customer scope before mutations. Recorded/voided evidence cannot receive a stale draft edit; registration exactly once preserves winner audit, terms and immutable customer snapshots.",
+    "Failure/revoked access leaves all fields/status/audit unchanged, original fee-method/currency/storage/date validations remain. Preserve supported historical read/void semantics and controlled stale/conflict errors, no fallback unprotected relational writes or provider/test permission exemptions.",
+    "Meaningful unit/service/controller and genuine isolated two-connection SQL races cover update versus record/void, record versus record/void, duplicate identity create if affected, revoked authority and valid lifecycle. Assert stored status/terms/audit equal one serialized ordering and no partial writes. Run original agreement SQL/terms/scope/void regressions and safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Agreement update/record/void use same existing-entity lock and transaction, re-reading current status and live authority/customer scope before mutations. Recorded/voided evidence cannot receive a stale draft edit; registration exactly once preserves winner audit, terms and immutable customer snapshots.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+      "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+      "docs/agency-agreement-concurrency.md",
+      "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyAgreementConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementConcurrencySqlServerTests.cs"
+    ],
+    "Failure/revoked access leaves all fields/status/audit unchanged, original fee-method/currency/storage/date validations remain. Preserve supported historical read/void semantics and controlled stale/conflict errors, no fallback unprotected relational writes or provider/test permission exemptions.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+      "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+      "docs/agency-agreement-concurrency.md",
+      "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyAgreementConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementConcurrencySqlServerTests.cs"
+    ],
+    "Meaningful unit/service/controller and genuine isolated two-connection SQL races cover update versus record/void, record versus record/void, duplicate identity create if affected, revoked authority and valid lifecycle. Assert stored status/terms/audit equal one serialized ordering and no partial writes. Run original agreement SQL/terms/scope/void regressions and safe Release/full units.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+      "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+      "docs/agency-agreement-concurrency.md",
+      "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyAgreementConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementConcurrencySqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "AgencyServiceFeeAgreementService UpdateAsync:89-139 and RecordAsync:234-265 / VoidAsync:270 use Load/state checks followed by writes without BeginTransaction/Lock; controller has no transaction/lock wrapper. ERP-069/439 add explicit evidence/authority and516 adds stored terms, not common mutation lock. Full history/docs search for agency/agreement concurrency found receipt/allocation tasks349/350/378 only, no agreement serialization.",
+  "depends_on": [
+    "ERP-518",
+    "ERP-516",
+    "ERP-439"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-519",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T03:38:04.892331Z"
+}

@@ -1,0 +1,109 @@
+{
+  "title": "Serialize agency statement collection capacity and voiding across distinct receipts",
+  "description": "Close statement-side financial capacity and status race using existing shared statement guard. AgencyServiceFeeCollectionAllocationService.CreateAsync currently begins transaction and locks ReceiptId only, then reads statement totals and existing allocations; two different receipt locks do not serialize the shared StatementId budget. StatementService.VoidAsync does not coordinate collection creation. Acquire shared statement row lock within allocation create/void in a globally consistent order with existing receipt locks, re-read both entities and active allocation sums, and reject statement void while effective collection allocations remain (explicitly void those allocation evidences first). Preserve original shared receipt budget across order/invoice/agency allocations, per-statement/receipt row limits, duplicate rules and all scope/currency/owner checks. Do not lock receipt rows from statement void unless needed; avoid new lock inversion. Review other callers of statement/receipt guards before implementation. Preserve existing current identity/menu/customer scope and explicit source ownership; recheck in locked authoritative state without new grants. Reuse relational transaction/row-lock patterns from existing business services, ensure deterministic documented lock order and safe nested transaction handling. No schema/migration, microservice, new database, implicit fee calculation or accounting/receipt posting. Clear failed tracked changes on rejection as existing business patterns require; no partial state/rows/audit/snapshots. Historical reads and void evidence retained, no deletion/backfill of snapshots. Adapt necessary original fixtures genuinely with original assertions intact. All logs/TRX under .ai/logs/<task>, original failures retained. Mandatory true two-independent-connection SQL race tests using barriers/controlled ordering, never timing sleeps alone; fresh dedicated GUID NEWERP_AUTOTEST only, no drop/reset/reuse/production. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeCollectionAllocationController.cs",
+    "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeStatementService.cs",
+    "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+    "docs/agency-statement-collection-concurrency.md",
+    "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+    "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+    "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+    "src/ERP.UnitTests/AgencyStatementCollectionConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/AgencyStatementCollectionConcurrencySqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Different receipts allocating same recorded statement serialize on shared statement budget lock; no over-allocation, duplicate active pair or limit bypass. Same receipt cross-family budget locking remains, and currency/customer ownership never changes. Re-read authoritative status/amount/sums under locks before one evidence insert.",
+    "Statement void and allocation create/void share statement lock: a statement with live collection evidence cannot be voided; after explicit allocation void retains snapshots/audit, statement may follow existing void rules. Concurrent allocation/statement void produces one valid serialized ordering, no active allocation referencing newly voided statement. Deterministic receipt/statement lock order documented and used consistently, rollback leaves all evidence unchanged.",
+    "Mandatory genuine isolated independent-connection races cover two receipts one remaining statement capacity, allocation versus statement void, allocation void versus parent void and same-receipt agency/order/invoice budgets; exactly one capacity winner and conserved sums/status/audit. Test denied authority/ownership/currency and explicit void-release flow, run original receipt/agency collection/statement SQL regressions plus safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Different receipts allocating same recorded statement serialize on shared statement budget lock; no over-allocation, duplicate active pair or limit bypass. Same receipt cross-family budget locking remains, and currency/customer ownership never changes. Re-read authoritative status/amount/sums under locks before one evidence insert.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeCollectionAllocationController.cs",
+      "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeStatementService.cs",
+      "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+      "docs/agency-statement-collection-concurrency.md",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyStatementCollectionConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyStatementCollectionConcurrencySqlServerTests.cs"
+    ],
+    "Statement void and allocation create/void share statement lock: a statement with live collection evidence cannot be voided; after explicit allocation void retains snapshots/audit, statement may follow existing void rules. Concurrent allocation/statement void produces one valid serialized ordering, no active allocation referencing newly voided statement. Deterministic receipt/statement lock order documented and used consistently, rollback leaves all evidence unchanged.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeCollectionAllocationController.cs",
+      "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeStatementService.cs",
+      "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+      "docs/agency-statement-collection-concurrency.md",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyStatementCollectionConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyStatementCollectionConcurrencySqlServerTests.cs"
+    ],
+    "Mandatory genuine isolated independent-connection races cover two receipts one remaining statement capacity, allocation versus statement void, allocation void versus parent void and same-receipt agency/order/invoice budgets; exactly one capacity winner and conserved sums/status/audit. Test denied authority/ownership/currency and explicit void-release flow, run original receipt/agency collection/statement SQL regressions plus safe Release/full units.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeCollectionAllocationController.cs",
+      "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeStatementService.cs",
+      "src/ERP.Application/Services/AgencyFeeEvidenceConcurrencyRules.cs",
+      "docs/agency-statement-collection-concurrency.md",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyStatementCollectionConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/AgencyStatementCollectionConcurrencySqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "AgencyServiceFeeCollectionAllocationService.CreateAsync:93-97 starts transaction and locks only receipt, then statement sums:120; VoidAsync:250-254 locks only receipt. StatementService.VoidAsync:474-494 freezes void status without coordinating active agency allocations. Receipt lock protects shared receipt but not parallel different receipts for one statement. Existing ERP-350/378 protections are receipt-side; no statement-budget lock task found. These routes lack common statement serialization pending520.",
+  "depends_on": [
+    "ERP-520",
+    "ERP-350",
+    "ERP-378"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-521",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T03:38:04.906798Z"
+}
