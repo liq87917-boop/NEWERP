@@ -16,6 +16,9 @@ namespace ERP.Api.Controllers;
 /// ERP-097 权威客户数据范围（<see cref="TaxRefundLedgerRules"/>），并把范围下推到计数 / 分页；新增 / 修改
 /// 另校验金额、退税率、币种、退税期间与申报 / 到账日期。缺失 / 禁用 / 已删除 / 撤销菜单的身份一律以既有受控
 /// 非披露错误 fail closed，不新增任何授权，也不把空身份当作管理员。</para>
+/// <para>ERP-529：新增 / 修改在任何字段落库之前另校验金额与退税率可在权威列声明的 <c>DECIMAL(18,4)</c>、
+/// 汇率严格大于 0 且可在 <c>DECIMAL(18,6)</c> 内<b>逐位原样</b>存储（第 5 / 第 7 位小数、零 / 负汇率与量级溢出
+/// 一律以既有受控错误拒绝，绝不取整、截断或回填）；被拒请求零台账行、零改写。</para>
 /// </summary>
 [ApiController]
 [Route("api/base/tax-refunds")]
@@ -68,7 +71,8 @@ public class TaxRefundController : BaseCrudController<BaseTaxRefund>
         return Ok(ApiResponse<BaseTaxRefund>.Success(entity));
     }
 
-    /// <summary>新增：写入任何字段之前完成授权、范围 / 真实启用客户与金额 / 税率 / 期间 / 日期校验。</summary>
+    /// <summary>新增：写入任何字段之前完成授权、范围 / 真实启用客户与金额 / 税率 / 汇率 / 期间 / 日期校验
+    /// （含 ERP-529 的金额与退税率 <c>DECIMAL(18,4)</c>、汇率严格为正且 <c>DECIMAL(18,6)</c> 逐位原样可存储判定）。</summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] BaseTaxRefund entity)
     {
@@ -80,7 +84,8 @@ public class TaxRefundController : BaseCrudController<BaseTaxRefund>
         return Ok(ApiResponse<BaseTaxRefund>.Success(result, "新增成功"));
     }
 
-    /// <summary>修改：先授权并复核已存行归属，再校验拟议范围与字段规则，失败不落任何改写。</summary>
+    /// <summary>修改：先授权并复核已存行归属，再校验拟议范围与字段规则（含 ERP-529 的持久化精度与汇率正值判定），
+    /// 失败不落任何改写。</summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] BaseTaxRefund entity)
     {

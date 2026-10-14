@@ -1227,6 +1227,22 @@ public partial class ErpDbContext
         modelBuilder.Entity<PurchaseQuote>().Property(x => x.QuotePrice).HasPrecision(18, 4);
         modelBuilder.Entity<PurchaseQuote>().Property(x => x.TotalAmount).HasPrecision(18, 4);
 
+        // ============ ERP-529：出口退税台账的实际存储精度（与 SchemaUpgrader 第 12.4 段建表脚本同源） ============
+        // 设计口径：
+        //   1. db_owner.BaseTaxRefunds 由权威建表脚本（SchemaUpgrader 第 12.4 段）以 ExportAmount / RefundRate /
+        //      RefundableAmount / RefundedAmount = DECIMAL(18,4)、ExchangeRate = DECIMAL(18,6) 创建；EF 模型此前
+        //      **未**显式 HasPrecision，按 SQL Server 默认精度把这五列映射为 decimal(18,2)，于是合法的 3 / 4 位小数
+        //      金额与 3..6 位小数汇率在到达 SQL 之前被静默取整到 2 位，与实际列声明不一致；
+        //   2. 这里显式声明精度让模型映射与权威列声明**逐字一致**（与 BaseProductSupplier.MinOrderQty / Stock 系列 /
+        //      PurchaseQuote 同一处理），合法的 4 位小数金额与 6 位小数汇率原样往返；
+        //   3. 只声明精度：不新增表 / 列 / 索引 / 菜单 / 权限，不改任何列类型与 DDL；不可原样存储的值由
+        //      TaxRefundLedgerRules 在写入任何字段之前受控拒绝（绝不静默取整 / 截断）。
+        modelBuilder.Entity<BaseTaxRefund>().Property(x => x.ExportAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseTaxRefund>().Property(x => x.ExchangeRate).HasPrecision(18, 6);
+        modelBuilder.Entity<BaseTaxRefund>().Property(x => x.RefundRate).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseTaxRefund>().Property(x => x.RefundableAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseTaxRefund>().Property(x => x.RefundedAmount).HasPrecision(18, 4);
+
         // ============ ERP-095：供应商比价价格审批与供应商选择历史（append-only） ============
         // 设计口径：
         //   1. 只记录「批准 / 拒绝」决定与选中供应商快照，不自动选供应商、不定价、不改写比价行、

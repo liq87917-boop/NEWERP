@@ -25,6 +25,12 @@ namespace ERP.Application.Services;
 /// <see cref="BaseTaxRefund.RefundableAmount"/> / <see cref="BaseTaxRefund.RefundedAmount"/> 非负、
 /// <see cref="BaseTaxRefund.RefundRate"/> 落在 0..100、已退税不超过可退税、币种与退税期间非空且有界、
 /// 申报 / 到账日期内部一致；一律<b>拒绝而不静默截断 / 回填</b>。被拒绝的写入不落任何台账行。</item>
+/// <item><b>持久化精度（ERP-529）</b>：<see cref="BaseTaxRefund.ExportAmount"/> /
+/// <see cref="BaseTaxRefund.RefundRate"/> / <see cref="BaseTaxRefund.RefundableAmount"/> /
+/// <see cref="BaseTaxRefund.RefundedAmount"/> 必须在权威建表列声明的 <c>DECIMAL(18,4)</c> 内<b>逐位原样</b>可存储，
+/// <see cref="BaseTaxRefund.ExchangeRate"/> 必须<b>严格大于 0</b> 且能在 <c>DECIMAL(18,6)</c> 内逐位原样可存储：
+/// 第 5 / 第 7 位小数、零 / 负汇率与量级溢出都在改写任何字段之前以既有受控错误拒绝，
+/// <b>绝不取整、截断、归零或回填</b>（ERP-508 <see cref="FinancePersistedAmountRules"/> 为系统唯一标量边界口径）。</item>
 /// </list>
 /// <para><b>身份来源唯一</b>：请求提交体中的任何字段都不能指定或扩大账号身份 —— 身份只来自已认证请求主体
 /// （<c>ClaimTypes.NameIdentifier</c>），由调用方（<see cref="ERP.Api.Controllers.TaxRefundController"/>）解析并
@@ -110,6 +116,57 @@ public static class TaxRefundLedgerRules
     public const string InconsistentDatesText =
         "申报日期（DeclareDate）与退税到账日期（RefundDate）内部不一致：到账日期不能早于申报日期，且都必须是合理日期";
 
+    /// <summary>汇率必须严格大于 0 的拒绝文案（ERP-529）</summary>
+    public const string NonPositiveExchangeRateText =
+        "汇率（ExchangeRate）必须严格大于 0（禁止零值 / 负值）";
+
+    /// <summary>出口金额字段标签（<c>DECIMAL(18,4)</c> 持久化精度受控错误文案前缀，ERP-529）</summary>
+    public const string ExportAmountFieldText = "出口金额（ExportAmount）";
+
+    /// <summary>可退税额字段标签（<c>DECIMAL(18,4)</c>，ERP-529）</summary>
+    public const string RefundableAmountFieldText = "可退税额（RefundableAmount）";
+
+    /// <summary>已退税额字段标签（<c>DECIMAL(18,4)</c>，ERP-529）</summary>
+    public const string RefundedAmountFieldText = "已退税额（RefundedAmount）";
+
+    /// <summary>退税率字段标签（<c>DECIMAL(18,4)</c>，ERP-529）</summary>
+    public const string RefundRateFieldText = "退税率（RefundRate）";
+
+    /// <summary>
+    /// 四个小数位金额 / 退税率列（<c>db_owner.BaseTaxRefunds</c> 的 <c>DECIMAL(18,4)</c>）的持久化精度口径文案
+    /// （接口 / 文档同源，ERP-529）：绝对值不超过 <c>99_999_999_999_999.9999</c> 且小数位不超过 4，
+    /// 不可逐位原样存储的值一律受控拒绝，绝不静默取整或截断。
+    /// </summary>
+    public const string PersistedAmountPrecisionText =
+        "必须在 db_owner.BaseTaxRefunds 的 DECIMAL(18,4) 列内逐位原样可存储"
+        + "（绝对值不超过 99_999_999_999_999.9999 且小数位不超过 4）：不可表示的值一律受控拒绝，绝不静默取整或截断";
+
+    /// <summary>
+    /// 汇率列（<c>db_owner.BaseTaxRefunds</c> 的 <c>DECIMAL(18,6)</c>）的持久化精度口径文案（ERP-529）：
+    /// 必须严格大于 0、小数位不超过 6 且不超过 <c>999_999_999_999.999999</c>，不可逐位原样存储的值一律受控拒绝。
+    /// </summary>
+    public const string PersistedExchangeRatePrecisionText =
+        "汇率（ExchangeRate）必须能在 db_owner.BaseTaxRefunds 的 DECIMAL(18,6) 列内逐位原样可存储"
+        + "（不超过 999_999_999_999.999999 且小数位不超过 6）：不可表示的值一律受控拒绝，绝不静默取整或回填";
+
+    /// <summary>金额列有效位数（<c>DECIMAL(18,4)</c> / <c>DECIMAL(18,6)</c> 共用，与列声明同源）。</summary>
+    public const int DecimalPrecision = FinancePersistedAmountRules.DecimalPrecision;
+
+    /// <summary>四个小数位金额 / 退税率列的实际小数位（<c>DECIMAL(18,4)</c>，与列声明同源）。</summary>
+    public const int AmountScale = FinancePersistedAmountRules.DecimalScale4;
+
+    /// <summary>汇率列的实际小数位（<c>DECIMAL(18,6)</c>，与列声明同源）。</summary>
+    public const int ExchangeRateScale = FinancePersistedAmountRules.DecimalScale6;
+
+    /// <summary><c>DECIMAL(18,4)</c> 最大可表示值（与列声明同源）。</summary>
+    public const decimal MaxAmount = FinancePersistedAmountRules.MaxDecimal18Scale4;
+
+    /// <summary><c>DECIMAL(18,4)</c> 最小可表示值（与列声明同源）。</summary>
+    public const decimal MinAmount = FinancePersistedAmountRules.MinDecimal18Scale4;
+
+    /// <summary><c>DECIMAL(18,6)</c> 最大可表示值（与列声明同源）。</summary>
+    public const decimal MaxExchangeRate = FinancePersistedAmountRules.MaxDecimal18Scale6;
+
     /// <summary>授权与数据范围口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "出口退税台账（分页 / 全部 / 详情 / 新增 / 修改 / 删除 / 批量删除）在读取任何计数或写入之前，"
@@ -117,6 +174,7 @@ public static class TaxRefundLedgerRules
         + "既有「出口退税台账」（tax-refund）菜单授权与 ERP-097 权威客户数据范围；"
         + "台账只按持久化 CustomerId 判定归属，受限账号不得访问无主行与范围外行，特权账号保留历史访问；"
         + "新增 / 修改前校验金额非负、退税率 0..100、已退税不超过可退税、币种与期间非空有界、申报 / 到账日期一致，"
+        + "并校验金额 / 退税率可在 DECIMAL(18,4)、汇率严格为正且可在 DECIMAL(18,6) 内逐位原样存储，"
         + "拒绝而不静默截断或回填；身份只来自已认证请求主体，客户端提交体不能指定或扩大范围。";
 
     /// <summary>边界文案（不新增权限 / 表列，不改变只读报表口径）</summary>
@@ -265,13 +323,63 @@ public static class TaxRefundLedgerRules
     }
 
 
-    // ==================== 4. 金额 / 税率 / 期间 / 日期校验（不改写实体） ====================
+    // ==================== 4. 金额 / 税率 / 汇率 / 期间 / 日期校验（不改写实体） ====================
 
     /// <summary>
-    /// 出口退税台账写入校验：出口金额、可退税额、已退税额非负；退税率落在 0..100；已退税不超过可退税；
-    /// 币种与退税期间非空且不超过既有存储上界；申报 / 到账日期合理且到账不早于申报。
+    /// <paramref name="value"/> 能否在四个小数位金额列（<c>DECIMAL(18,4)</c>，与 <c>db_owner.BaseTaxRefunds</c>
+    /// 的 <c>ExportAmount</c> / <c>RefundRate</c> / <c>RefundableAmount</c> / <c>RefundedAmount</c> 列声明同源）
+    /// 内<b>逐位原样</b>存储：数值的小数位不超过 4（半进位取整不会改变数值）且绝对值不超过列上限。
+    /// <para>纯判定：绝不取整、截断或改写入参。第 5 位小数（如 <c>1.00005</c>）、量级溢出（如 <c>1e14</c>、
+    /// <c>decimal.MaxValue</c>）与「只有半进位取整后才恰好落到上限」的值一律 <c>false</c>；
+    /// 恰好等于 ±<see cref="MaxAmount"/> 的值放行。</para>
+    /// </summary>
+    public static bool IsAmountRepresentable(decimal value)
+        => value >= MinAmount && value <= MaxAmount
+           && decimal.Round(value, AmountScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 汇率能否在汇率列（<c>DECIMAL(18,6)</c>，与 <c>db_owner.BaseTaxRefunds.ExchangeRate</c> 列声明同源）内
+    /// <b>逐位原样</b>存储：必须<b>严格大于 0</b>、小数位不超过 6 且不超过列上限。
+    /// <para>纯判定：绝不取整、归零、换算或改写入参。零 / 负汇率、第 7 位小数（如 <c>1.0000005</c>）与量级溢出
+    /// （如 <c>1e12</c>）一律 <c>false</c>；恰好等于 <see cref="MaxExchangeRate"/> 的值放行。</para>
+    /// </summary>
+    public static bool IsExchangeRateRepresentable(decimal value)
+        => value > 0m && value <= MaxExchangeRate
+           && decimal.Round(value, ExchangeRateScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 校验（并按原值返回）一个金额 / 退税率标量可在 <c>DECIMAL(18,4)</c> 列内逐位原样存储；不可表示时抛既有受控
+    /// 业务错误（<c>1001 InvalidParameter</c>）。纯函数：绝不取整、截断或改写任何状态，也绝不回填。
+    /// <para><paramref name="fieldText"/> 只用于错误文案前缀（例如「出口金额（ExportAmount）」）。</para>
+    /// </summary>
+    public static decimal EnsureAmountRepresentable(decimal value, string fieldText)
+    {
+        ArgumentNullException.ThrowIfNull(fieldText);
+        if (!IsAmountRepresentable(value))
+            throw BusinessException.InvalidParameter(
+                $"{fieldText}{PersistedAmountPrecisionText}：当前值 {value}");
+        return value;
+    }
+
+    /// <summary>
+    /// 校验（并按原值返回）汇率严格大于 0 且可在 <c>DECIMAL(18,6)</c> 列内逐位原样存储；不可表示时抛既有受控
+    /// 业务错误（<c>1001 InvalidParameter</c>）。纯函数：绝不取整、归零、换算或改写任何状态。
+    /// </summary>
+    public static decimal EnsureExchangeRateRepresentable(decimal value)
+    {
+        if (!IsExchangeRateRepresentable(value))
+            throw BusinessException.InvalidParameter(
+                $"{PersistedExchangeRatePrecisionText}：当前值 {value}");
+        return value;
+    }
+
+    /// <summary>
+    /// 出口退税台账写入校验：出口金额、可退税额、已退税额非负且可在实际列声明的 <c>DECIMAL(18,4)</c> 内逐位原样存储；
+    /// 退税率落在 0..100 且同样可在 <c>DECIMAL(18,4)</c> 内逐位原样存储；汇率严格大于 0 且可在
+    /// <c>DECIMAL(18,6)</c> 内逐位原样存储；已退税不超过可退税；币种与退税期间非空且不超过既有存储上界；
+    /// 申报 / 到账日期合理且到账不早于申报。
     /// 任一不满足即在改写任何字段之前以既有受控校验错误（<c>1001 InvalidParameter</c>）拒绝，
-    /// <b>绝不静默截断、取整或回填</b>任何字段。
+    /// <b>绝不静默截断、取整或回填</b>任何字段（含汇率：绝不静默取整、归零或回填默认值）。
     /// </summary>
     public static void Validate(BaseTaxRefund entity)
     {
@@ -279,15 +387,25 @@ public static class TaxRefundLedgerRules
 
         if (entity.ExportAmount < 0m)
             throw BusinessException.InvalidParameter($"{NegativeExportAmountText}：当前值 {entity.ExportAmount}");
+        EnsureAmountRepresentable(entity.ExportAmount, ExportAmountFieldText);
+
         if (entity.RefundableAmount < 0m)
             throw BusinessException.InvalidParameter(
                 $"{NegativeRefundableAmountText}：当前值 {entity.RefundableAmount}");
+        EnsureAmountRepresentable(entity.RefundableAmount, RefundableAmountFieldText);
+
         if (entity.RefundedAmount < 0m)
             throw BusinessException.InvalidParameter(
                 $"{NegativeRefundedAmountText}：当前值 {entity.RefundedAmount}");
+        EnsureAmountRepresentable(entity.RefundedAmount, RefundedAmountFieldText);
 
         if (entity.RefundRate < 0m || entity.RefundRate > 100m)
             throw BusinessException.InvalidParameter($"{InvalidRefundRateText}：当前值 {entity.RefundRate}");
+        EnsureAmountRepresentable(entity.RefundRate, RefundRateFieldText);
+
+        if (entity.ExchangeRate <= 0m)
+            throw BusinessException.InvalidParameter($"{NonPositiveExchangeRateText}：当前值 {entity.ExchangeRate}");
+        EnsureExchangeRateRepresentable(entity.ExchangeRate);
 
         if (entity.RefundedAmount > entity.RefundableAmount)
             throw BusinessException.InvalidParameter(

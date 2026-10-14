@@ -802,6 +802,93 @@ public class TaxRefundLedgerTests
         Assert.DoesNotContain("IsPrivileged = true", source);
     }
 
+    // ==================== 7. ERP-529 持久化精度：既有授权 / 范围口径不变且被拒写入零台账行 ====================
+
+    [Fact]
+    public async Task 持久化精度_受限账号本人客户_过小数位金额_拒绝且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var (user, employee, _) = await SeedOperatorAsync(db);
+        var own = SeedCustomer(db, "TAX529-OWN", employee.Id);
+
+        // 授权 / 范围先解析（受限账号在范围内），随后才是持久化精度拒绝：受控 InvalidParameter，而非 Forbidden。
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => Controller(db, user.Id).Create(Draft(own.Id, exportAmount: 1000.00005m)));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("ExportAmount", ex.Message);
+        Assert.Equal(0, await db.BaseTaxRefunds.AsNoTracking().CountAsync());
+
+        // 合法四位小数金额 + 六位小数汇率照常按范围落库。
+        var leg = Draft(own.Id, exportAmount: 1000.1234m);
+        leg.ExchangeRate = 7.123456m;
+        Assert.IsType<OkObjectResult>(await Controller(db, user.Id).Create(leg));
+        Assert.Equal(1, await db.BaseTaxRefunds.AsNoTracking().CountAsync());
+    }
+
+    [Fact]
+    public async Task 持久化精度_无菜单授权_优先按权限不足拒绝且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var (user, employee, _) = await SeedOperatorAsync(db, grantMenu: false);
+        var own = SeedCustomer(db, "TAX529-NOMENU", employee.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => Controller(db, user.Id).Create(Draft(own.Id, exportAmount: 1000.00005m)));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.Contains(TaxRefundLedgerRules.RequiredMenuCode, ex.Message);
+        Assert.Equal(0, await db.BaseTaxRefunds.AsNoTracking().CountAsync());
+    }
+
+    [Fact]
+    public async Task 持久化精度_越范围客户_优先按范围拒绝且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var (user, _, _) = await SeedOperatorAsync(db);
+        var foreign = SeedCustomer(db, "TAX529-FOREIGN");
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => Controller(db, user.Id).Create(Draft(foreign.Id, exportAmount: 1000.00005m)));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.Equal(0, await db.BaseTaxRefunds.AsNoTracking().CountAsync());
+    }
+
+    [Fact]
+    public async Task 持久化精度_受限账号修改本人行_汇率不可表示_拒绝且原行不变()
+    {
+        using var db = TestDbFactory.Create();
+        var (user, employee, _) = await SeedOperatorAsync(db);
+        var own = SeedCustomer(db, "TAX529-UPD-OWN", employee.Id);
+        var row = SeedLedger(db, "TR529-UPD-OWN", own.Id, exportAmount: 700m, refundRate: 9m);
+
+        var edit = Draft(own.Id, exportAmount: 800m, refundRate: 9m);
+        edit.Id = row.Id;
+        edit.ExchangeRate = 1.0000005m;   // 第 7 位小数：真实列会静默取整
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => Controller(db, user.Id).Update(row.Id, edit));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("ExchangeRate", ex.Message);
+
+        var stored = await db.BaseTaxRefunds.AsNoTracking().SingleAsync(x => x.Id == row.Id);
+        Assert.Equal(700m, stored.ExportAmount);
+        Assert.Equal(1m, stored.ExchangeRate);
+        Assert.Equal(9m, stored.RefundRate);
+        Assert.Equal((long?)own.Id, stored.CustomerId);
+        Assert.False(stored.IsDeleted);
+    }
+
+    [Fact]
+    public async Task 持久化精度_无身份_优先按未认证拒绝且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var zeroRate = Draft(null);
+        zeroRate.ExchangeRate = 0m;
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => Controller(db, null).Create(zeroRate));
+        Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
+        Assert.Equal(0, await db.BaseTaxRefunds.AsNoTracking().CountAsync());
+    }
+
     private static string ReadSource(string relativePath)
         => File.ReadAllText(Path.GetFullPath(Path.Combine(
             new[] { AppContext.BaseDirectory, "..", "..", "..", "..", ".." }
