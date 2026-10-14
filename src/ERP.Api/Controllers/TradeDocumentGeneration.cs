@@ -428,11 +428,15 @@ public static class TradeDocumentGeneration
         // ERP-394：生成目标必须归属到来源单据的权威客户并在实时范围内（受限账号无主 / 越界 fail closed），
         // 在唯一编号守卫与任何写入之前校验，绝不产生半成品单证或绕过目标授权。
         EnsureGeneratedTargetAuthorized(targetScope, doc);
-        await EnsureUniqueDocNoAsync(db, doc, ct);
 
         var lines = buildLines?.Invoke(docType) ?? new TradeDocumentLineSnapshotResult { DocType = docType };
         EnsureLineBound(docType, lines);
 
+        // ERP-518：编号预约与任何写入之前，先把**整批持久化标量**（表头金额 + 每一行数量 / 单价 / 净重 / 毛重 /
+        // 行金额）判定在实际列精度内；任一不可表示即受控拒绝（零编号占用、零表头 / 明细 / 来源改写）。
+        TradeDocumentGenerationMutationRules.EnsurePersistedBatchRepresentable(doc, lines);
+
+        await EnsureUniqueDocNoAsync(db, doc, ct);
         db.TradeDocuments.Add(doc);
         return (doc, lines);
     }

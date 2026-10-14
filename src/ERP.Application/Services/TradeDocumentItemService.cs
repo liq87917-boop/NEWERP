@@ -33,6 +33,11 @@ namespace ERP.Application.Services;
 /// 既有「单证中心」菜单，并以<b>非空</b>范围调用本服务。<c>scope</c> 仍可省略，仅服务不经过单证路由的既有
 /// <b>已授权</b>只读派生调用（兼容性用；这些调用方在自己的入口已完成实时授权），<b>绝不是</b>匿名 / 管理员 /
 /// 环境 / 测试专用放行，也不可由任何 <c>api/trade/documents</c> 路由到达。</para>
+/// <para><b>数值存储边界（ERP-518）</b>：新增 / 修改明细行在**任何已跟踪写入之前**（<see cref="CreateCoreAsync"/>
+/// 的 <c>Add</c> 之前、<see cref="UpdateCoreAsync"/> 的字段赋值之前）经 <see cref="TradeDocumentItemRules"/> 校验
+/// 数量 / 单价 / 净重 / 毛重（<c>DECIMAL(18,4)</c>）与**服务端计算**的行金额（<c>DECIMAL(18,2)</c>）可在实际列精度内
+/// 原样落库，越界 / 乘法溢出受控拒绝且零写入。清单读取的行金额合计与箱数 / 重量合计是**只读聚合展示**，
+/// 刻意不施加单列存储上界。</para>
 /// </summary>
 public static class TradeDocumentItemService
 {
@@ -69,6 +74,8 @@ public static class TradeDocumentItemService
 
         var items = rows.Select(row => Map(row, document, products)).ToList();
         var currency = TradeDocumentItemRules.NormalizeCurrency(document.Currency);
+        // ERP-518：清单读取是**只读聚合展示** —— 合计刻意不施加单列存储上界（单列边界只约束会落库的标量），
+        // 多个各自合法的行金额 / 重量可以合法地超过单个 DECIMAL(18,2) / DECIMAL(18,4) 列容量。
         var lineTotal = items.Sum(i => i.LineAmount);
 
         var packageLines = rows.Count(r => r.PackageCount is not null);

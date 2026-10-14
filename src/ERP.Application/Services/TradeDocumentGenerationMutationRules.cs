@@ -279,6 +279,23 @@ public static class TradeDocumentGenerationMutationRules
         }
     }
 
+    /// <summary>
+    /// 生成批次的**持久化标量**复核（ERP-518，编号预约与任何写入之前）：表头金额与**每一行**明细的
+    /// 数量 / 单价 / 净重 / 毛重（<c>DECIMAL(18,4)</c>）与行金额（<c>DECIMAL(18,2)</c>）都必须能在实际列精度内
+    /// 原样落库，任一不可表示即受控拒绝（<c>InvalidParameter</c>）。
+    /// <para>绝不截断、绝不遗漏非法明细行、绝不为凑存储把单价 / 数量臆造成 0；未登记的可选重量保持 <c>null</c>，
+    /// 装箱单行的零单价 / 零金额照常放行。被拒请求零编号占用、零表头 / 明细 / 来源改写，与既有
+    /// <see cref="EnsureDraftMatchesSource"/> / <see cref="EnsureLinesMatchSource"/> 在同一批复核口径内。</para>
+    /// </summary>
+    public static void EnsurePersistedBatchRepresentable(
+        TradeDocument draft, TradeDocumentLineSnapshotResult lines)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(lines);
+        TradeDocumentItemRules.EnsureHeaderAmountRepresentable(draft.Amount);
+        foreach (var line in lines.Lines) TradeDocumentItemRules.EnsurePersistedLineRepresentable(line);
+    }
+
     // ==================== 4. 权威快照事实（供锁内复核，全部来自本次权威重读） ====================
 
     /// <summary>

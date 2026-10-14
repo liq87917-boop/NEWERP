@@ -93,19 +93,27 @@ public static class TradeDocumentLineSnapshotRules
     public static string SanitizeRemark(string? value)
         => SanitizeText(value, TradeDocumentItemRules.MaxRemarkLength);
 
-    /// <summary>数量：必须大于 0、最多 4 位小数；否则返回 null（由调用方 fail-closed 拒绝生成）</summary>
+    /// <summary>
+    /// 数量：必须大于 0、最多 4 位小数，且可在实际列精度（<c>DECIMAL(18,4)</c>）内原样存储；
+    /// 否则返回 null（由调用方 fail-closed 拒绝生成，绝不静默截断或为凑存储臆造 0 值）。
+    /// </summary>
     public static decimal? NormalizeQuantity(decimal quantity)
     {
         if (quantity <= 0m) return null;
         if (decimal.Round(quantity, TradeDocumentItemRules.MaxAmountDecimals) != quantity) return null;
+        if (!TradeDocumentItemRules.IsItemScalarRepresentable(quantity)) return null;
         return quantity;
     }
 
-    /// <summary>单价：不能为负、最多 4 位小数；否则返回 null（由调用方 fail-closed 拒绝生成）</summary>
+    /// <summary>
+    /// 单价：不能为负、最多 4 位小数，且可在实际列精度（<c>DECIMAL(18,4)</c>）内原样存储；
+    /// 否则返回 null（由调用方 fail-closed 拒绝生成）。
+    /// </summary>
     public static decimal? NormalizeUnitPrice(decimal unitPrice)
     {
         if (unitPrice < 0m) return null;
         if (decimal.Round(unitPrice, TradeDocumentItemRules.MaxAmountDecimals) != unitPrice) return null;
+        if (!TradeDocumentItemRules.IsItemScalarRepresentable(unitPrice)) return null;
         return unitPrice;
     }
 
@@ -139,6 +147,13 @@ public static class TradeDocumentLineSnapshotRules
         var value = sourceWeight.Value;
         return value <= 0m ? null : decimal.Round(value, MaxWeightDecimals);
     }
+
+    /// <summary>
+    /// 来源毛重（已按 4 位小数收敛）是否可在实际列精度（<c>DECIMAL(18,4)</c>）内原样存储；
+    /// <c>null</c>（来源未登记，留空而不是 0）恒视为可表示。
+    /// </summary>
+    public static bool IsGrossWeightRepresentable(decimal? roundedWeight)
+        => roundedWeight is null || TradeDocumentItemRules.IsItemScalarRepresentable(roundedWeight.Value);
 
     // ==================== 2. 来源明细的有界只读装载 ====================
 
@@ -253,8 +268,20 @@ public static class TradeDocumentLineSnapshotRules
         string sourceLabel, string? sourceNo, int lineNo, string fieldName, decimal value)
         => BusinessException.RuleConflict(
             $"{sourceLabel}「{SanitizeText(sourceNo, 50)}」第 {lineNo} 行{fieldName}={value} 不合法"
-            + "（数量必须大于 0 且最多 4 位小数、单价不能为负）：请先修正来源明细后再生成单证，"
-            + "系统不静默丢弃来源明细行、也不臆造数值");
+            + $"（数量必须大于 0 且最多 4 位小数、单价不能为负，且都必须可在实际列精度 "
+            + $"DECIMAL({TradeDocumentItemRules.ItemScalarPrecision},{TradeDocumentItemRules.ItemScalarScale}) 内原样存储）："
+            + "请先修正来源明细后再生成单证，系统不静默丢弃来源明细行、不截断、也不臆造数值");
+
+    /// <summary>
+    /// 来源毛重超出实际列精度：拒绝生成并要求先修正来源单据
+    /// （绝不静默截断，也绝不把来源毛重静默留空丢弃 —— 那会制造与来源不符的快照）。
+    /// </summary>
+    private static BusinessException FailWeightOutOfRange(
+        string sourceLabel, string? sourceNo, int lineNo, decimal value)
+        => BusinessException.RuleConflict(
+            $"{sourceLabel}「{SanitizeText(sourceNo, 50)}」第 {lineNo} 行毛重={value} 超出可存储范围"
+            + $"（DECIMAL({TradeDocumentItemRules.ItemScalarPrecision},{TradeDocumentItemRules.ItemScalarScale})）："
+            + "已拒绝生成，绝不静默截断或留空丢弃来源重量，请先修正来源明细后再生成单证");
 
     /// <summary>来源明细没有可核对的商品身份：拒绝生成（与 ERP-051「空行无从核对」同一口径）</summary>
     private static BusinessException FailMissingIdentity(string sourceLabel, string? sourceNo, int lineNo)
@@ -419,6 +446,11 @@ public static class TradeDocumentLineSnapshotRules
             if (IsNonIntegralPackageCount(detail.Cartons)) nonIntegralPackages++;
             if (detail.Weight <= 0m) unrecordedWeights++;
 
+            // ERP-518：毛重必须在实际列精度（DECIMAL(18,4)）内可原样存储；越界 fail closed，绝不静默留空丢弃来源重量。
+            var grossWeight = GrossWeightOf(detail.Weight);
+            if (!IsGrossWeightRepresentable(grossWeight))
+                throw FailWeightOutOfRange(LoadingListSourceLabel, list.LoadingListNo, index + 1, detail.Weight);
+
             lines.Add(new TradeDocumentItem
             {
                 LineNo = index + 1,
@@ -433,7 +465,7 @@ public static class TradeDocumentLineSnapshotRules
                 LineAmount = 0m,                       // 装箱单不含价格口径
                 PackageCount = packageCount,
                 NetWeight = null,                      // 清单明细没有净重列：留空（不推断）
-                GrossWeight = GrossWeightOf(detail.Weight),
+                GrossWeight = grossWeight,
                 Currency = currency,
                 Remark = SanitizeRemark(detail.Remark),
                 CreatedAt = DateTime.Now,

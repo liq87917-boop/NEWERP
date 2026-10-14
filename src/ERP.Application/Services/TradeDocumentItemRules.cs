@@ -69,6 +69,32 @@ public static class TradeDocumentItemRules
     /// <summary>数量 / 单价 / 重量允许的最大小数位</summary>
     public const int MaxAmountDecimals = 4;
 
+    /// <summary>
+    /// 数量 / 单价 / 净重 / 毛重列的**实际位数**（<c>DECIMAL(18,4)</c>，与 EF 显式 <c>HasPrecision(18,4)</c> 同源，ERP-518）。
+    /// </summary>
+    public const int ItemScalarPrecision = 18;
+
+    /// <summary>数量 / 单价 / 净重 / 毛重列的实际小数位（<c>DECIMAL(18,4)</c>，与 <see cref="MaxAmountDecimals"/> 同源）</summary>
+    public const int ItemScalarScale = MaxAmountDecimals;
+
+    /// <summary>行金额列的实际位数（<c>DECIMAL(18,2)</c>，与 EF 显式 <c>HasPrecision(18,2)</c> 同源）</summary>
+    public const int LineAmountPrecision = 18;
+
+    /// <summary>行金额列的实际小数位（<c>DECIMAL(18,2)</c>）</summary>
+    public const int LineAmountScale = 2;
+
+    /// <summary>单证表头金额列的实际位数（<c>DECIMAL(18,2)</c>，EF 默认精度，模型未显式声明）</summary>
+    public const int HeaderAmountPrecision = 18;
+
+    /// <summary>单证表头金额列的实际小数位（<c>DECIMAL(18,2)</c>，与明细行金额同精度）</summary>
+    public const int HeaderAmountScale = 2;
+
+    /// <summary>行金额字段名（错误文案 / 文档同源）</summary>
+    public const string LineAmountLabel = "行金额";
+
+    /// <summary>单证表头金额字段名（错误文案 / 文档同源）</summary>
+    public const string HeaderAmountLabel = "单证表头金额";
+
     /// <summary>箱数上限（有界；超过一律拒绝，避免把明显异常值写入快照）</summary>
     public const int MaxPackageCount = 1_000_000;
 
@@ -96,7 +122,9 @@ public static class TradeDocumentItemRules
         + "商品编码 / 中英文名称 / 规格 / 单位）。数量必须大于 0，单价最多 4 位小数，行金额一律由服务端按"
         + "「数量 × 单价」并按币种精度计算（不接受客户端金额）；商业发票行必须使用单证币种且币种在系统币种口径内，"
         + "装箱单行不含单价与金额（恒为 0）。箱数 / 净重 / 毛重可选：未登记即为空白，不臆造为 0；填写毛重时不得小于净重。"
-        + "行序留空由服务端追加，显式指定时同一单证内不得重复。";
+        + "行序留空由服务端追加，显式指定时同一单证内不得重复。"
+        + "数量 / 单价 / 净重 / 毛重必须能在实际列精度 DECIMAL(18,4) 内原样存储，行金额（服务端计算）与单证表头金额"
+        + "必须能在 DECIMAL(18,2) 内原样存储：越界一律在落库之前受控拒绝，绝不静默截断或取整。";
 
     /// <summary>模块边界文案（明确不是第二套商品主数据 / 库存交易 / 报关核定价格）</summary>
     public const string BoundaryText =
@@ -210,16 +238,22 @@ public static class TradeDocumentItemRules
 
     // ==================== 3. 数值与币种校验 ====================
 
-    /// <summary>数量校验：必须大于 0，最多 4 位小数（超精度一律拒绝，不静默取整）</summary>
+    /// <summary>
+    /// 数量校验：必须大于 0，最多 4 位小数，且可在实际列精度（<c>DECIMAL(18,4)</c>）内原样存储
+    /// （超精度 / 越界一律拒绝，不静默取整或截断）。
+    /// </summary>
     public static decimal NormalizeQuantity(decimal quantity)
     {
         if (quantity <= 0)
             throw BusinessException.InvalidParameter($"数量必须大于 0：收到 {quantity}");
         EnsureDecimals(quantity, "数量");
-        return quantity;
+        return EnsureItemScalarRepresentable(quantity, "数量");
     }
 
-    /// <summary>单价校验：不能为负，最多 4 位小数；装箱单行必须为 0（不含价格口径）</summary>
+    /// <summary>
+    /// 单价校验：不能为负，最多 4 位小数，且可在实际列精度（<c>DECIMAL(18,4)</c>）内原样存储；
+    /// 装箱单行必须为 0（不含价格口径）。
+    /// </summary>
     public static decimal NormalizeUnitPrice(decimal unitPrice, bool pricingAllowed)
     {
         if (unitPrice < 0)
@@ -234,17 +268,20 @@ public static class TradeDocumentItemRules
         }
 
         EnsureDecimals(unitPrice, "单价");
-        return unitPrice;
+        return EnsureItemScalarRepresentable(unitPrice, "单价");
     }
 
-    /// <summary>重量校验（净重 / 毛重，可选）：不能为负，最多 4 位小数；未填写保持 null（不臆造为 0）</summary>
+    /// <summary>
+    /// 重量校验（净重 / 毛重，可选）：不能为负，最多 4 位小数，且可在实际列精度（<c>DECIMAL(18,4)</c>）内
+    /// 原样存储；未填写保持 null（不臆造为 0，也不静默截断）。
+    /// </summary>
     public static decimal? NormalizeWeight(decimal? weight, string fieldName)
     {
         if (weight is null) return null;
         if (weight.Value < 0)
             throw BusinessException.InvalidParameter($"{fieldName}不能为负数：收到 {weight.Value}");
         EnsureDecimals(weight.Value, fieldName);
-        return weight.Value;
+        return EnsureItemScalarRepresentable(weight.Value, fieldName);
     }
 
     /// <summary>箱数校验（可选）：不能为负，且不超过有界上限；未填写保持 null（不臆造为 0）</summary>
@@ -295,9 +332,67 @@ public static class TradeDocumentItemRules
     /// <summary>
     /// 行金额（服务端权威计算）：数量 × 单价，按币种精度取整（0.5 进位，确定性）；
     /// 客户端提交的金额一律忽略，装箱单行单价为 0 时金额恒为 0。
+    /// <para><b>实际存储边界（ERP-518）</b>：乘法先经受控溢出防护（CLR 十进制溢出 → 受控业务错误），
+    /// 再按**既有**币种精度取整（零小数币种 JPY / KRW / VND / IDR 语义原样保留），最后判定行金额列
+    /// <c>DECIMAL(18,2)</c> 能否原样落库；任一不满足即受控拒绝，绝不静默截断或取整。</para>
     /// </summary>
     public static decimal ComputeLineAmount(decimal quantity, decimal unitPrice, string? currency)
-        => CurrencyAmountRules.RoundAmount(quantity * unitPrice, currency);
+    {
+        var product = FinancePersistedAmountRules.SafeMultiply(quantity, unitPrice, LineAmountLabel);
+        var rounded = CurrencyAmountRules.RoundAmount(product, currency);
+        return EnsureLineAmountRepresentable(rounded);
+    }
+
+    /// <summary>
+    /// 数量 / 单价 / 净重 / 毛重是否可在实际列精度（<c>DECIMAL(18,4)</c>）内**原样**表示。
+    /// <para>调用方必须传入已按 4 位小数收敛的值：本方法只做区间判定（按目标列小数位取整后判上界），
+    /// 绝不重新取整、绝不截断、绝不改写任何状态。</para>
+    /// </summary>
+    public static bool IsItemScalarRepresentable(decimal value)
+        => FinancePersistedAmountRules.IsWithinDecimal18(value, ItemScalarScale);
+
+    /// <summary>行金额是否可在实际列精度（<c>DECIMAL(18,2)</c>）内原样表示（只做区间判定，不改写值）。</summary>
+    public static bool IsLineAmountRepresentable(decimal lineAmount)
+        => FinancePersistedAmountRules.IsWithinDecimal18(lineAmount, LineAmountScale);
+
+    /// <summary>单证表头金额是否可在实际列精度（<c>DECIMAL(18,2)</c>）内原样表示（只做区间判定，不改写值）。</summary>
+    public static bool IsHeaderAmountRepresentable(decimal headerAmount)
+        => FinancePersistedAmountRules.IsWithinDecimal18(headerAmount, HeaderAmountScale);
+
+    /// <summary>
+    /// 校验（并按原值返回）数量 / 单价 / 净重 / 毛重可在实际列精度内表示；越界抛受控业务错误
+    /// （<c>InvalidParameter</c>，绝不静默截断或取整）。
+    /// </summary>
+    public static decimal EnsureItemScalarRepresentable(decimal value, string fieldName)
+        => FinancePersistedAmountRules.EnsureWithinDecimal18(value, ItemScalarScale, fieldName);
+
+    /// <summary>校验（并按原值返回）行金额可在实际列精度内表示；越界抛受控业务错误。</summary>
+    public static decimal EnsureLineAmountRepresentable(decimal lineAmount)
+        => FinancePersistedAmountRules.EnsureWithinDecimal18(lineAmount, LineAmountScale, LineAmountLabel);
+
+    /// <summary>
+    /// 校验（并按原值返回）单证表头金额可在实际列精度（<c>DECIMAL(18,2)</c>）内表示；越界抛受控业务错误
+    /// （表头金额与明细行金额同精度，绝不静默截断）。
+    /// </summary>
+    public static decimal EnsureHeaderAmountRepresentable(decimal headerAmount)
+        => FinancePersistedAmountRules.EnsureWithinDecimal18(headerAmount, HeaderAmountScale, HeaderAmountLabel);
+
+    /// <summary>
+    /// 校验一条**已构造**的明细行快照的全部持久化标量可在实际列精度内原样落库
+    /// （数量 / 单价 / 净重 / 毛重 <c>DECIMAL(18,4)</c>；行金额 <c>DECIMAL(18,2)</c>）。
+    /// <para>未登记的可选重量保持 <c>null</c>（不臆造为 0）；装箱单行的零单价 / 零金额照常放行。
+    /// 供生成入口在编号预约与任何写入之前把**整批**明细行一起判定（任一不可表示即受控拒绝，
+    /// 绝不截断行、绝不为凑存储丢弃明细行或臆造 0 值）。</para>
+    /// </summary>
+    public static void EnsurePersistedLineRepresentable(TradeDocumentItem line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        EnsureItemScalarRepresentable(line.Quantity, "数量");
+        EnsureItemScalarRepresentable(line.UnitPrice, "单价");
+        if (line.NetWeight is { } netWeight) EnsureItemScalarRepresentable(netWeight, "净重");
+        if (line.GrossWeight is { } grossWeight) EnsureItemScalarRepresentable(grossWeight, "毛重");
+        EnsureLineAmountRepresentable(line.LineAmount);
+    }
 
     /// <summary>超精度校验（数量 / 单价 / 重量最多 4 位小数）</summary>
     private static void EnsureDecimals(decimal value, string fieldName)

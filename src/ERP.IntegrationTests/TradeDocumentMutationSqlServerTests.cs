@@ -52,37 +52,30 @@ public sealed class TradeDocumentMutationSqlServerTests
 
     // ==================== 控制器 / 双连接脚手架 ====================
 
-    private static TradeDocumentController NewController(
-        ErpDbContext db, SalespersonDataScope? scope, long? userId = null)
+    /// <summary>
+    /// ERP-497：绑定<b>真实启用身份</b>（<c>ClaimTypes.NameIdentifier</c>）的单证中心控制器 —— 单证路由的实时授权
+    /// 由动作内部无条件解析，<b>不再</b>依赖请求管线过滤器或 <c>HttpContext.Items</c> 范围通道；缺失身份一律按未认证拒绝。
+    /// </summary>
+    private static TradeDocumentController NewController(ErpDbContext db, long? userId = null)
     {
         var http = new DefaultHttpContext();
         if (userId.HasValue)
             http.User = new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
-        if (scope is not null)
-            http.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = scope;
 
         var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
         controller.ControllerContext = new ControllerContext { HttpContext = http };
         return controller;
     }
 
-    private static SalespersonDataScope Restricted(long salesmanId, params long[] allowedCustomerIds) => new()
-    {
-        IsPrivileged = false, SalesmanId = salesmanId, AllowedCustomerIds = allowedCustomerIds.ToHashSet()
-    };
-
-    private static SalespersonDataScope Privileged() =>
-        new() { IsPrivileged = true, SalesmanId = null, AllowedCustomerIds = null };
-
     /// <summary>用一条独立连接执行控制器动作（每次调用各自 DbContext / 连接 / 事务），返回成功标志与错误。</summary>
     private async Task<(bool Success, string Error)> TryAsync(
-        SalespersonDataScope? scope, Func<TradeDocumentController, Task<IActionResult>> action)
+        long userId, Func<TradeDocumentController, Task<IActionResult>> action)
     {
         await using var db = _fixture.CreateDbContext();
         try
         {
-            var result = await action(NewController(db, scope));
+            var result = await action(NewController(db, userId));
             return (result is OkObjectResult, string.Empty);
         }
         catch (Exception ex)
@@ -133,6 +126,34 @@ public sealed class TradeDocumentMutationSqlServerTests
         await db.SaveChangesAsync();
         return customer;
     }
+
+    /// <summary>
+    /// 播种真实启用身份（既有系统内置角色 → 特权数据范围）：并发 / 生命周期用例据此取得与生产同口径的实时授权
+    /// （<see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/> 动作内解析），
+    /// 不使用任何匿名 / 管理员 / 测试专用旁路。
+    /// </summary>
+    private static async Task<long> SeedPrivilegedUserAsync(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleName = $"INT_E395_PRIV_{Tag()}", RoleCode = $"INT_E395P_{Guid.NewGuid():N}", IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        await db.SaveChangesAsync();
+
+        var user = new SysUser
+        {
+            UserName = $"INT_E395_PRIV_{Tag()}", PasswordHash = "hash",
+            PasswordSalt = "salt", DisplayName = "特权集成账号", Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        await db.SaveChangesAsync();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        await db.SaveChangesAsync();
+        return user.Id;
+    }
+
 
     /// <summary>播种受限业务员账号：登录名 = 员工编码（ERP-097 权威映射），并按需授予既有 doc-center 菜单。</summary>
     private static async Task<(SysUser User, BaseEmployee Employee, SysRole Role)> SeedOperatorAsync(
@@ -224,14 +245,16 @@ public sealed class TradeDocumentMutationSqlServerTests
     public async Task 两个独立连接_并发同显式行序_唯一赢家_另一合法冲突且回滚()
     {
         Guard();
-        long documentId;
+        long documentId, userId;
         await using (var seed = _fixture.CreateDbContext())
+        {
             documentId = (await SeedDocumentAsync(seed, $"INT_E395_DUP_{Tag()}", customerId: null)).Id;
+            userId = await SeedPrivilegedUserAsync(seed);
+        }
 
-        var scope = Privileged();
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.CreateItem(documentId, Item(lineOrder: 5))),
-            () => TryAsync(scope, c => c.CreateItem(documentId, Item(lineOrder: 5))));
+            () => TryAsync(userId, c => c.CreateItem(documentId, Item(lineOrder: 5))),
+            () => TryAsync(userId, c => c.CreateItem(documentId, Item(lineOrder: 5))));
 
         Assert.Equal(1, results.Count(r => r.Success));
         Assert.Contains(results, r => !r.Success && r.Error.Contains("行序"));
@@ -248,14 +271,16 @@ public sealed class TradeDocumentMutationSqlServerTests
     public async Task 两个独立连接_并发自动行序_两行都落库且行序唯一()
     {
         Guard();
-        long documentId;
+        long documentId, userId;
         await using (var seed = _fixture.CreateDbContext())
+        {
             documentId = (await SeedDocumentAsync(seed, $"INT_E395_AUTO_{Tag()}", customerId: null)).Id;
+            userId = await SeedPrivilegedUserAsync(seed);
+        }
 
-        var scope = Privileged();
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.CreateItem(documentId, Item())),
-            () => TryAsync(scope, c => c.CreateItem(documentId, Item())));
+            () => TryAsync(userId, c => c.CreateItem(documentId, Item())),
+            () => TryAsync(userId, c => c.CreateItem(documentId, Item())));
 
         Assert.All(results, r => Assert.True(r.Success, r.Error));
 
@@ -271,17 +296,17 @@ public sealed class TradeDocumentMutationSqlServerTests
     public async Task 两个独立连接_明细行修改与删除_串行化无撕裂()
     {
         Guard();
-        long itemId;
+        long itemId, userId;
         await using (var seed = _fixture.CreateDbContext())
         {
             var document = await SeedDocumentAsync(seed, $"INT_E395_UD_{Tag()}", customerId: null);
             itemId = (await SeedItemAsync(seed, document.Id, quantity: 2m)).Id;
+            userId = await SeedPrivilegedUserAsync(seed);
         }
 
-        var scope = Privileged();
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.UpdateItem(itemId, Item(quantity: 9m))),
-            () => TryAsync(scope, c => c.DeleteItem(itemId)));
+            () => TryAsync(userId, c => c.UpdateItem(itemId, Item(quantity: 9m))),
+            () => TryAsync(userId, c => c.DeleteItem(itemId)));
 
         Assert.True(results[1].Success, results[1].Error);   // 删除串行化后必定成功
 
@@ -297,19 +322,19 @@ public sealed class TradeDocumentMutationSqlServerTests
     public async Task 两个独立连接_并发表头冻结与明细行新增_冻结后不再接受写入()
     {
         Guard();
-        long documentId;
+        long documentId, userId;
         TradeDocument freeze;
         await using (var seed = _fixture.CreateDbContext())
         {
             var document = await SeedDocumentAsync(seed, $"INT_E395_FREEZE_{Tag()}", customerId: null);
             documentId = document.Id;
             freeze = FreezeEdit(document);
+            userId = await SeedPrivilegedUserAsync(seed);
         }
 
-        var scope = Privileged();
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.Update(documentId, freeze)),
-            () => TryAsync(scope, c => c.CreateItem(documentId, Item())));
+            () => TryAsync(userId, c => c.Update(documentId, freeze)),
+            () => TryAsync(userId, c => c.CreateItem(documentId, Item())));
 
         Assert.True(results[0].Success, results[0].Error);   // 冻结只前进状态，必定成功
 
@@ -329,14 +354,16 @@ public sealed class TradeDocumentMutationSqlServerTests
     public async Task 两个独立连接_并发表头删除与明细行新增_删除后不再接受写入()
     {
         Guard();
-        long documentId;
+        long documentId, userId;
         await using (var seed = _fixture.CreateDbContext())
+        {
             documentId = (await SeedDocumentAsync(seed, $"INT_E395_DEL_{Tag()}", customerId: null)).Id;
+            userId = await SeedPrivilegedUserAsync(seed);
+        }
 
-        var scope = Privileged();
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.Delete(documentId)),
-            () => TryAsync(scope, c => c.CreateItem(documentId, Item())));
+            () => TryAsync(userId, c => c.Delete(documentId)),
+            () => TryAsync(userId, c => c.CreateItem(documentId, Item())));
 
         Assert.True(results[0].Success, results[0].Error);   // 删除必定成功
 
@@ -368,11 +395,8 @@ public sealed class TradeDocumentMutationSqlServerTests
             documentId = (await SeedDocumentAsync(seed, $"INT_E395_OFF_{tag}", foreign.Id)).Id;
         }
 
-        SalespersonDataScope scope;
-        await using (var auth = _fixture.CreateDbContext())
-            scope = await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(auth, userId);
-
-        var result = await TryAsync(scope, c => c.CreateItem(documentId, Item()));
+        // ERP-497：真实启用身份下的越界客户单证 —— 动作内实时解析数据范围后 fail closed（零落库）。
+        var result = await TryAsync(userId, c => c.CreateItem(documentId, Item()));
         Assert.False(result.Success);
 
         await using var verify = _fixture.CreateDbContext();

@@ -122,6 +122,8 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
         TradeDocumentMutationRules.EnsureKnownStatus(entity.Status);
         await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(
             _db, scope, entity);
+        // ERP-518：表头金额（DECIMAL(18,2)）必须在落库前收敛到实际列容量内，越界受控拒绝（零单证写入）。
+        TradeDocumentItemRules.EnsureHeaderAmountRepresentable(entity.Amount);
         var result = await Service.CreateAsync(entity);
         return Ok(ApiResponse<TradeDocument>.Success(result, "新增成功"));
     }
@@ -147,6 +149,9 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
             TradeDocumentMutationRules.EnsureHeaderUpdateAllowed(existing, entity);
 
             await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(_db, scope, entity);
+
+            // ERP-518：拟议表头金额（DECIMAL(18,2)）必须在锁内落库前收敛到实际列容量内，越界受控拒绝（零改写）。
+            TradeDocumentItemRules.EnsureHeaderAmountRepresentable(entity.Amount);
 
             var result = await Service.UpdateAsync(entity);
             if (transaction is not null) await transaction.CommitAsync();
@@ -572,10 +577,10 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
 /// <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/> 无条件执行，
 /// 与请求路径 / 请求形状 / 是否绑定请求上下文完全无关（契约见
 /// <see cref="TradeDocumentAuthorizationRules.PathIndependenceText"/>）。
-/// <para>本类型不再实现任何过滤器、也不再被任何生产代码或路由引用；仅保留一个惰性字符串常量，供一行历史
-/// SQL 集成测试文件（<c>TradeDocumentMutationSqlServerTests</c>，不在本任务改动范围内）保持可编译。
-/// <b>该常量没有任何读取方</b>：它不构成授权输入、不构成匿名 / 管理员 / 环境 / 测试专用放行，也不是任何
-/// 「未解析身份即不受限」的旁路。</para>
+/// <para>本类型不再实现任何过滤器、也不再被任何生产代码、路由或测试引用；仅保留一个惰性字符串常量作为
+/// 历史编译占位（ERP-518 起 <c>TradeDocumentMutationSqlServerTests</c> 也已改用真实启用身份，
+/// 不再读取该常量）。<b>该常量没有任何读取方</b>：它不构成授权输入、不构成匿名 / 管理员 / 环境 /
+/// 测试专用放行，也不是任何「未解析身份即不受限」的旁路。</para>
 /// </summary>
 public static class TradeDocumentRequestAuthorizationFilter
 {
