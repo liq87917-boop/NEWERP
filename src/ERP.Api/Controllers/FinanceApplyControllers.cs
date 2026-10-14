@@ -26,6 +26,10 @@ namespace ERP.Api.Controllers;
 /// 先上游销售订单行、后申请单行），再加载权威状态 / 字段并在锁内复核身份 + 菜单授权 + 既有与请求客户 / 来源范围、
 /// 持久化商业字段与来源链接；失败整体回滚（状态、原始字段与审计不变）。取消销售订单侧由
 /// <see cref="SalesOrderCancellationRules"/> 协同：仍有未删除且未取消的定金申请单指向该订单时拒绝取消。</para>
+/// <para>ERP-508：创建 / 修改在**单号预约与任何写入之前**，对按币种精度取整后的金额追加金额列实际存储精度
+/// （<c>DECIMAL(18,2)</c>）校验；提交 / 审核经 <see cref="FinanceDepositApplyLifecycleRules.EnsurePersistedApplyConsistentAsync"/>
+/// 在既有来源订单行锁 + 申请单行锁内复核**已持久化**金额的同一口径。极大正金额在触及单号与任何表头 / 来源
+/// 写入之前即被受控拒绝（零写入、零占号）；历史读取 / 取消 / 删除语义不变。</para>
 /// <para>本护栏不真的收款、不记账 / 生成凭证、不核销或移动资金，也不改写销售订单、收款单与分摊证据、库存与成本。</para>
 /// </summary>
 [Route("api/finance/deposit-applies")]

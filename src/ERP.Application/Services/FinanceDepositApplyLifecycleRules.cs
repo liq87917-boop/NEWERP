@@ -41,7 +41,7 @@ public static class FinanceDepositApplyLifecycleRules
     public const string RuleText =
         "定金申请单生命周期护栏：创建 / 修改 / 提交 / 审核 / 取消 / 删除与读取都会重新校验当前实时启用身份、" +
         "定金申请单（deposit-apply）菜单授权与当前权威客户数据范围；" +
-        "创建与修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 的金额与大于 0 的汇率；" +
+        "创建与修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 且落在金额列实际存储精度（DECIMAL(18,2)）内的金额与大于 0 的汇率；" +
         "提供销售订单 Id 时按 Id 精确解析既有、未删除、未取消、客户一致且币种兼容的来源订单（绝不按文本或金额猜测来源），" +
         "历史未关联来源（空来源）语义原样保留；" +
         "修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取来源销售订单行锁、再取定金申请单行锁，" +
@@ -120,7 +120,13 @@ public static class FinanceDepositApplyLifecycleRules
         => NormalizeApplyCurrency(currency.ToString());
 
     /// <summary>
-    /// 申请金额校验（服务端权威）：按币种精度四舍五入（0.5 进位）后必须大于 0；返回取整后的金额。
+    /// 申请金额校验（服务端权威）：按币种精度四舍五入（0.5 进位）后必须大于 0，且取整后的**标量金额**必须落在
+    /// 申请金额列的实际存储精度（<c>DECIMAL(18,2)</c>，见 <see cref="FinancePersistedAmountRules"/>）内 ——
+    /// 极大正金额绝不能穿透到 SQL 才被截断 / 溢出。返回取整后的金额。
+    /// <para>取整口径（含零小数币种与 <c>AwayFromZero</c>）**原样**复用
+    /// <see cref="CurrencyAmountRules.RoundAmount"/>，本方法只在取整之后追加存储边界判定（含「取整进位后越过
+    /// SQL 单列上限」）。创建 / 修改在**单号预约与任何写入之前**调用本方法；提交 / 审核经
+    /// <see cref="EnsurePersistedApplyConsistentAsync"/> 在既有行锁内复核**已持久化**金额。</para>
     /// </summary>
     public static decimal NormalizeApplyAmount(decimal amount, string? currency)
     {
@@ -129,7 +135,7 @@ public static class FinanceDepositApplyLifecycleRules
             throw BusinessException.InvalidParameter(
                 $"申请金额必须大于 0：当前值 {amount} 按币种 {CurrencyAmountRules.NormalizeCurrency(currency)} "
                 + $"精度取整后为 {rounded}");
-        return rounded;
+        return FinancePersistedAmountRules.EnsureRepresentable(rounded, "申请金额按币种精度取整后");
     }
 
     /// <summary>申请单金额的权威口径（按币种精度取整；用于与历史金额比对，避免精度差异导致误判变更）</summary>

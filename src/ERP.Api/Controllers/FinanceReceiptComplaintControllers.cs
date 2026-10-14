@@ -19,6 +19,10 @@ namespace ERP.Api.Controllers;
 /// （<see cref="CustomerReceiptLifecycleRules.LockReceiptRowAsync"/>，与两套分摊证据写入 / 作废同一锁序：先收款单行、
 /// 后分摊行），再加载权威状态 / 客户 / 币种 / 金额并在锁内复核身份 / 菜单 / 客户范围与有效证据；任一步失败整体回滚，
 /// 原状态、原始字段与审计保持不变。</para>
+/// <para>ERP-508：创建 / 修改在**单号预约与任何写入之前**，对按币种精度取整后的金额追加金额列实际存储精度
+/// （<c>DECIMAL(18,2)</c>）校验；提交 / 审核在同一把收款单行锁内复核**已持久化**金额的同一口径
+/// （<see cref="CustomerReceiptLifecycleRules.EnsurePersistedReceiptAmountConsistent"/>）。极大正金额在触及
+/// 单号与任何表头 / 来源写入之前即被受控拒绝（零写入、零占号）；历史读取 / 取消 / 删除语义不变。</para>
 /// <para>ERP-479：既有「收款单」菜单改由本规范控制器（<c>api/finance/receipts</c>，规范 <c>Id</c> 口径）承载，
 /// 不再映射到已由 ERP-404 门禁整体停用（fail closed）的旧存储过程族；旧族 <c>Oid</c> 读侧保持只读可用，
 /// 规范 <c>Id</c> 与旧 <c>Oid</c> 之间<b>不存在</b>任何映射，也绝不启用任何旧写适配器。
@@ -209,6 +213,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
             if (GetStatus(entity) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
 
+            // ERP-508：提交作为承诺边界，在既有收款单行锁内复核**已持久化**金额仍可按币种精度取整并落在收款
+            // 金额列的实际存储精度（DECIMAL(18,2)）内；纯只读复核，失败整体回滚（状态、原始字段与审计不变）。
+            CustomerReceiptLifecycleRules.EnsurePersistedReceiptAmountConsistent(entity);
+
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
 
@@ -247,6 +255,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
             await EnsureReceiptAuthorizedAsync(entity);
             if (GetStatus(entity) != DocumentStatus.Submitted)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            // ERP-508：审核作为承诺边界，在既有收款单行锁内复核**已持久化**金额仍可按币种精度取整并落在收款
+            // 金额列的实际存储精度（DECIMAL(18,2)）内；纯只读复核，失败整体回滚（状态、原始字段与审计不变）。
+            CustomerReceiptLifecycleRules.EnsurePersistedReceiptAmountConsistent(entity);
 
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
