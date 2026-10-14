@@ -17,7 +17,8 @@ namespace ERP.Api.Controllers;
 /// <b>之前</b>都重新解析实时身份（缺失 / 非法 / 已删除按未认证，禁用按权限不足）与既有「样品管理」
 /// （<c>sample</c>）功能菜单授权（缺菜单 / 被撤销按权限不足），一律 fail closed；
 /// 读取按 ERP-097 业务员数据范围（<see cref="SalespersonDataScopeService"/> 唯一权威口径）下推过滤，
-/// 新增 / 修改要求写入的 <c>CustomerId</c> 落在当前范围并指向已知的未删除客户，且经有界字段校验。
+/// 新增 / 修改要求写入的 <c>CustomerId</c> 落在当前范围并指向已知的未删除客户，且经有界字段校验
+/// （含 <c>Quantity</c> / <c>SampleFee</c> 按持久化 <c>DECIMAL(18,4)</c> 的四位小数逐位原样判定，ERP-532）。
 /// <b>不</b>新增任何菜单 / 权限 / 用户授权，也<b>不</b>因身份缺失而降级为管理员；软删除语义、
 /// ERP-063 附件证据归属（<c>OwnerType = Sample</c>）契约与 <see cref="GenericService{TEntity}"/> 契约保持不变。</para>
 /// </summary>
@@ -96,7 +97,8 @@ public class SampleController : BaseCrudController<Sample>
         return Ok(ApiResponse<Sample>.Success(entity));
     }
 
-    /// <summary>新增（落库前先经实时授权、有界字段校验与客户 / 商品 / 业务员引用与范围校验；被拒绝时不落任何行）</summary>
+    /// <summary>新增（落库前先经实时授权、有界字段校验——含 <c>Quantity</c> / <c>SampleFee</c> 的 <c>DECIMAL(18,4)</c>
+    /// 四位小数逐位原样判定（ERP-532）——与客户 / 商品 / 业务员引用与范围校验；被拒绝时不落任何行）</summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] Sample entity)
     {
@@ -106,7 +108,8 @@ public class SampleController : BaseCrudController<Sample>
         return await base.Create(entity);
     }
 
-    /// <summary>更新（落库前先经实时授权、有界字段校验与客户 / 商品 / 业务员引用与范围校验；被拒绝时不改写任何行）</summary>
+    /// <summary>更新（落库前先经实时授权、有界字段校验——含 <c>Quantity</c> / <c>SampleFee</c> 的 <c>DECIMAL(18,4)</c>
+    /// 四位小数逐位原样判定（ERP-532）——与客户 / 商品 / 业务员引用与范围校验；被拒绝时不改写任何行）</summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] Sample entity)
     {

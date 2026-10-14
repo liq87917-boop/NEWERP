@@ -443,6 +443,10 @@ public sealed class SampleAuthorizationSqlServerTests
     [InlineData("remark-too-long")]
     [InlineData("quantity-negative")]
     [InlineData("samplefee-too-large")]
+    [InlineData("quantity-too-large")]
+    [InlineData("quantity-fifth-place")]
+    [InlineData("samplefee-fifth-place")]
+    [InlineData("quantity-half-up-limit")]
     [InlineData("customer-missing")]
     [InlineData("customer-unknown")]
     [InlineData("product-unknown")]
@@ -468,6 +472,13 @@ public sealed class SampleAuthorizationSqlServerTests
             "quantity-negative" => NewSample($"SP-{Tag()}", customer.Id, quantity: -1m),
             "samplefee-too-large" => NewSample($"SP-{Tag()}", customer.Id,
                 sampleFee: SampleAuthorizationRules.MaxDecimalMagnitude + 1m),
+            "quantity-too-large" => NewSample($"SP-{Tag()}", customer.Id,
+                quantity: SampleAuthorizationRules.MaxDecimalMagnitude + 1m),
+            // ERP-532：第 5 位小数（含半进位取整后恰好落到 DECIMAL(18,4) 上限）不得原样存储，必须受控拒绝。
+            "quantity-fifth-place" => NewSample($"SP-{Tag()}", customer.Id, quantity: 0.01255m),
+            "samplefee-fifth-place" => NewSample($"SP-{Tag()}", customer.Id, sampleFee: 1.00005m),
+            "quantity-half-up-limit" => NewSample($"SP-{Tag()}", customer.Id,
+                quantity: 99999999999999.99985m),
             "customer-missing" => NewSample($"SP-{Tag()}", null),
             "customer-unknown" => NewSample($"SP-{Tag()}", 999999999),
             "product-unknown" => NewSample($"SP-{Tag()}", customer.Id, productId: 999999999),

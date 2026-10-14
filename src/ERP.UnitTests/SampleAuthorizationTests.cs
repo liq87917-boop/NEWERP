@@ -394,8 +394,8 @@ public class SampleAuthorizationTests
     // ==================== 4. 有界字段校验：拒绝且不落 / 不改写任何行 ====================
 
     /// <summary>
-    /// 授权身份下的非法载荷（样品编号空值 / 文本长度越界 / 数量与样品费为负或超范围 / 客户、商品与业务员引用非法）：
-    /// 新增与修改都按受控参数错误拒绝，且不落任何新行、不改写任何既有行。
+    /// 授权身份下的非法载荷（样品编号空值 / 文本长度越界 / 数量与样品费为负、超范围或超过 <c>DECIMAL(18,4)</c>
+    /// 四位小数 / 客户、商品与业务员引用非法）：新增与修改都按受控参数错误拒绝，且不落任何新行、不改写任何既有行。
     /// </summary>
     [Theory]
     [InlineData("empty-sampleno")]
@@ -415,6 +415,9 @@ public class SampleAuthorizationTests
     [InlineData("samplefee-negative")]
     [InlineData("quantity-too-large")]
     [InlineData("samplefee-too-large")]
+    [InlineData("quantity-fifth-place")]
+    [InlineData("samplefee-fifth-place")]
+    [InlineData("quantity-half-up-limit")]
     [InlineData("customer-missing")]
     [InlineData("customer-unknown")]
     [InlineData("customer-deleted")]
@@ -472,6 +475,11 @@ public class SampleAuthorizationTests
                 "SP-1", customer.Id, quantity: SampleAuthorizationRules.MaxDecimalMagnitude + 1m),
             "samplefee-too-large" => NewSample(
                 "SP-1", customer.Id, sampleFee: SampleAuthorizationRules.MaxDecimalMagnitude + 1m),
+            // ERP-532：第 5 位小数（含半进位取整后恰好落到 DECIMAL(18,4) 上限）不得原样存储，必须受控拒绝。
+            "quantity-fifth-place" => NewSample("SP-1", customer.Id, quantity: 0.01255m),
+            "samplefee-fifth-place" => NewSample("SP-1", customer.Id, sampleFee: 1.00005m),
+            "quantity-half-up-limit" => NewSample(
+                "SP-1", customer.Id, quantity: 99999999999999.99985m),
             "customer-missing" => NewSample("SP-1", null),
             "customer-unknown" => NewSample("SP-1", 999999),
             "customer-deleted" => NewSample("SP-1", deletedCustomer.Id),

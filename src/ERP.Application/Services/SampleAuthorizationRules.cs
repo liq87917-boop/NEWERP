@@ -76,6 +76,14 @@ public static class SampleAuthorizationRules
     /// 14 位整数 + 4 位小数），超出即无法落库，必须在写入前按参数错误拒绝。
     /// </summary>
     public const decimal MaxDecimalMagnitude = 99999999999999.9999m;
+
+    /// <summary>
+    /// 样品数值列（<c>Quantity</c> / <c>SampleFee</c>）的实际小数位（<c>DECIMAL(18,4)</c>，
+    /// 与建表脚本 / ERP-532 EF 映射同源）：小数位超过该值即无法<b>逐位原样</b>落库，
+    /// 必须在写入之前受控拒绝，绝不静默取整 / 截断。
+    /// </summary>
+    public const int PersistedDecimalScale = 4;
+
     /// <summary>无身份 / 非法身份的拒绝文案（受控、不泄露数据）</summary>
     public const string UnauthorizedText = "请先登录后再访问样品管理";
 
@@ -176,8 +184,9 @@ public static class SampleAuthorizationRules
     /// <item>规格（<c>Spec</c>）：≤ <see cref="MaxSpecLength"/>；</item>
     /// <item>业务员姓名（<c>SalesmanName</c>）：≤ <see cref="MaxSalesmanNameLength"/>；</item>
     /// <item>备注（<c>Remark</c>）：≤ <see cref="MaxRemarkLength"/>；</item>
-    /// <item>数量（<c>Quantity</c>）与样品费（<c>SampleFee</c>）：非负且 ≤ <see cref="MaxDecimalMagnitude"/>
-    /// （<c>DECIMAL(18,4)</c> 可存储范围内）。</item>
+    /// <item>数量（<c>Quantity</c>）与样品费（<c>SampleFee</c>）：非负且能在持久化 <c>DECIMAL(18,4)</c> 列内
+    /// **逐位原样**存储（≤ <see cref="MaxDecimalMagnitude"/> 且小数位 ≤ <see cref="PersistedDecimalScale"/>，
+    /// ERP-532）——量级溢出与第 5 位小数一律拒绝，绝不静默取整；</item>
     /// </list>
     /// 任一项不满足即按 <see cref="ErrorCodes.InvalidParameter"/> 的受控错误拒绝，<b>不</b>静默截断 / 夹取或改写任何字段，
     /// 被拒绝的写入不落任何 <c>Samples</c> 行（也<b>不</b>改写任何既有行）。
@@ -272,14 +281,26 @@ public static class SampleAuthorizationRules
     }
 
     /// <summary>
-    /// 数值列校验：非负且能落在持久化 <c>DECIMAL(18,4)</c> 范围内（不做静默夹取 / 改写）。
+    /// 判断一个 decimal 能否在样品数值列（<c>DECIMAL(18,4)</c>）内<b>逐位原样</b>存储：
+    /// 绝对值不超过 <see cref="MaxDecimalMagnitude"/> 且小数位不超过 <see cref="PersistedDecimalScale"/>。
+    /// <para>纯判定：绝不取整、截断或改写入参；第 5 位小数（如 <c>0.00001</c>）与量级溢出（如 <c>1e14</c>）一律
+    /// <c>false</c>；恰好等于 ±<see cref="MaxDecimalMagnitude"/> 的值放行。</para>
+    /// </summary>
+    public static bool IsPersistedDecimalRepresentable(decimal value)
+        => value >= -MaxDecimalMagnitude && value <= MaxDecimalMagnitude
+           && decimal.Round(value, PersistedDecimalScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 数值列校验：非负且能在持久化 <c>DECIMAL(18,4)</c> 列内**逐位原样**存储（量级与小数位同时判定），
+    /// 不可原样存储即按既有受控参数错误拒绝（<b>不做静默夹取，也不静默取整</b>）。
     /// </summary>
     private static void EnsureNonNegativePersistedDecimal(decimal value, string column, string fieldText)
     {
         if (value < 0)
             throw BusinessException.InvalidParameter($"样品{fieldText}（{column}）不能为负数");
-        if (value > MaxDecimalMagnitude)
+        if (!IsPersistedDecimalRepresentable(value))
             throw BusinessException.InvalidParameter(
-                $"样品{fieldText}（{column}）超出可存储范围（DECIMAL(18,4)），请填写 {MaxDecimalMagnitude} 以内的非负数值");
+                $"样品{fieldText}（{column}）超出可存储范围（DECIMAL(18,4)：绝对值不超过 {MaxDecimalMagnitude} " +
+                $"且小数位不超过 {PersistedDecimalScale}），请调整后再提交");
     }
 }

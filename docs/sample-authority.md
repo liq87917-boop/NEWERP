@@ -58,12 +58,14 @@
 | `CustomerName` / `ProductName` / `Spec` | 长度 ≤ 200 |
 | `SalesmanName` | 长度 ≤ 50 |
 | `Remark` | 长度 ≤ 500 |
-| `Quantity` / `SampleFee` | 非负且 ≤ `99999999999999.9999`（`DECIMAL(18,4)`） |
+| `Quantity` / `SampleFee` | 非负且能在 `DECIMAL(18,4)` 列内**逐位原样**存储：≤ `99999999999999.9999` 且小数位 ≤ 4（ERP-532） |
 | `CustomerId` | 必须非空为正、落在当前账号数据范围内，且指向已知的未删除客户 |
 | `ProductId` | 可空（`null` / `0` 视为未指定）；非空时必须指向已知的未删除商品 |
 | `SalesmanId` | 可空（`null` / `0` 视为未指定）；非空时必须指向已知的未删除员工 |
 
-- **不静默截断 / 夹取**任何字段：越界即拒绝，绝不把超长文本裁短或把超范围数值夹取后写入。
+- **不静默截断 / 夹取 / 取整**任何字段：越界即拒绝，绝不把超长文本裁短、把超范围数值夹取后写入，
+  或把超过四位的数量 / 样品费取整后写入（ERP-532：EF 映射与写入护栏都按 `DECIMAL(18,4)` 对齐，
+  详见 `docs/sample-persisted-numeric-bounds.md`）。
 - **`GenericService` 契约与软删除语义不变**：授权与校验都位于控制器层，通用 CRUD 服务的既有语义保持，
   其它派生自 `BaseCrudController` 的控制器不受影响。
 - **ERP-063 附件证据归属（`OwnerType = Sample`）契约不变**：附件证据只读样品台账（编号 / 类型 / 客户反馈原文），
@@ -84,7 +86,8 @@
 | 具备既有 `sample` 菜单 | 分页 / 全部 / 按主键 / 新增 / 修改 / 删除 / 批量删除既有契约放行 |
 | 授权身份下的受限业务员 | 只返回自己客户的样品，越界读取按「不存在」，越界写入 `2002`（ERP-097 范围不变） |
 | 请求之间撤销菜单授权 | 下一次请求 `2002`，零写入 |
-| 非法样品编号 / 文本越界 / 数值为负或超范围 / 客户、商品与业务员引用非法（`[Theory]`） | `1001`，新增不落行、修改不改写既有行 |
+| 非法样品编号 / 文本越界 / 数值为负或超范围 / 数值超过四位小数 / 客户、商品与业务员引用非法（`[Theory]`） | `1001`，新增不落行、修改不改写既有行 |
+| 数量 / 样品费实际精度（`SamplePersistedNumericBoundsTests`） | EF 映射两列为 `decimal(18,4)`；第 5 位小数 / 量级溢出 / 负数拒绝且字段不变；四位小数与上限原样往返 |
 | 边界值（各文本字段等于持久化上限、数值等于 `DECIMAL(18,4)` 上限） | 放行；超一位即 `1001` |
 | 控制器源码契约 | 7 条路由全部先 `EnsureAuthorizedScopeAsync()` 再读写；复用既有 `sample` 菜单；无 `AllowAnonymous` / 角色回退 / `Request.Path` / 环境回退 |
 
@@ -101,7 +104,8 @@
 | 既有种子管理员具备 `sample` 菜单 | 分页 / 全部 / 按主键 / 新增 / 修改 / 软删除 / 批量删除全部符合既有契约 |
 | 受限业务员 | 只读到 / 只写入自己客户的样品；越界读取按「不存在」，越界写入 `2002` |
 | 请求之间撤销菜单授权 | 下一次读取、新增、删除与批量删除均 `2002`，行未软删除 |
-| 授权后非法载荷（编号空值、文本越界、数值非法、客户 / 商品 / 业务员引用非法） | `1001`，零写入 |
+| 授权后非法载荷（编号空值、文本越界、数值非法或超四位小数、客户 / 商品 / 业务员引用非法） | `1001`，零写入 |
+| 数量 / 样品费实际精度（`SamplePersistedNumericBoundsSqlServerTests`） | 真实 `INFORMATION_SCHEMA` 确认两列为 `decimal(18,4)`；四位小数原样往返；过精度 / 溢出 / 负数受控拒绝零写入 |
 
 **真实 SQL 夹具安全口径**
 
@@ -126,3 +130,5 @@
 - 复用既有：`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`（角色 → 菜单）、
   `SalespersonDataScopeService`（ERP-097 唯一权威数据范围）、既有「样品管理」（`sample`）菜单
   与既有 `GenericService<TEntity>`。
+- 持久化数值精度（ERP-532）：`docs/sample-persisted-numeric-bounds.md`（`Quantity` / `SampleFee` 的
+  `DECIMAL(18,4)` EF 映射与四位小数写入护栏）。
