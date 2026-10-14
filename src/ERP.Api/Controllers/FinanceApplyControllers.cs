@@ -13,7 +13,8 @@ namespace ERP.Api.Controllers;
 /// <summary>
 /// 定金申请单控制器（ERP-381 生命周期护栏）：列表 / 详情 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除与读取都重新校验
 /// 实时启用身份（账号存在、未删除且启用）、定金申请单（deposit-apply）菜单授权与当前权威客户数据范围；
-/// 创建 / 修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 的金额、大于 0 的汇率，并按 Id 校验可空来源
+/// 创建 / 修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 的金额、大于 0 且可被汇率列实际存储精度
+/// （<c>DECIMAL(18,2)</c>）原样保存的汇率，并按 Id 校验可空来源
 /// 销售订单（必须既有 / 未删除 / 未取消 / 客户一致 / 币种兼容；空来源保留历史「未关联来源」语义，绝不按文本猜测）。
 /// <para><b>调用方闸门（ERP-381 恢复）</b>：列表 / 详情 / 已存储来源 / 来源候选 / 创建 / 修改 / 提交 / 审核 / 取消 /
 /// 删除的<strong>第一步</strong>都是实时启用身份 + 既有「定金申请单」（<c>deposit-apply</c>）菜单授权
@@ -30,6 +31,12 @@ namespace ERP.Api.Controllers;
 /// （<c>DECIMAL(18,2)</c>）校验；提交 / 审核经 <see cref="FinanceDepositApplyLifecycleRules.EnsurePersistedApplyConsistentAsync"/>
 /// 在既有来源订单行锁 + 申请单行锁内复核**已持久化**金额的同一口径。极大正金额在触及单号与任何表头 / 来源
 /// 写入之前即被受控拒绝（零写入、零占号）；历史读取 / 取消 / 删除语义不变。</para>
+/// <para>ERP-517：创建 / 修改在**单号预约与任何写入之前**，对按既有 6 位小数归一化后的汇率另加汇率列实际存储精度
+/// （<c>DECIMAL(18,2)</c>，EF 模型未显式 <c>HasPrecision</c>）校验：极小正汇率（归一化为 0）、真实列会静默收敛为
+/// <c>0.00</c> / 改写小数位的正汇率与超出 <c>DECIMAL(18,2)</c> 的极大汇率一律受控拒绝（零表头 / 来源 / 状态写入、
+/// 零占号）；提交 / 审核经 <see cref="FinanceDepositApplyLifecycleRules.EnsurePersistedApplyConsistentAsync"/> 在既有
+/// 来源订单行锁 + 申请单行锁内复核**已持久化**汇率的同一口径，非法历史快照只被拒绝、绝不静默修复 / 改写；
+/// 历史读取 / 取消 / 删除不新增任何草稿有效性闸门。</para>
 /// <para>本护栏不真的收款、不记账 / 生成凭证、不核销或移动资金，也不改写销售订单、收款单与分摊证据、库存与成本。</para>
 /// </summary>
 [Route("api/finance/deposit-applies")]
@@ -416,7 +423,8 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
 /// 绝不先读行再判权、绝不因 Id 是否存在而差异化，也绝不让被拒调用方触及任何业务查询。
 /// <para>闸门之后仍在申请单行锁内按**权威客户**重做完整三重授权（实时身份 / 菜单 / 客户数据范围）——
 /// 既有持久化客户与请求客户都必须在当前范围之内（被拒编辑绝不改写原始字段）；创建 / 修改校验真实可用客户、
-/// 受支持币种、按币种精度取整后大于 0 的金额、大于 0 的汇率，并按 Id 精确校验可空来源销售订单
+/// 受支持币种、按币种精度取整后大于 0 的金额、大于 0 且可被汇率列实际存储精度（<c>DECIMAL(18,2)</c>）原样保存的
+/// 汇率，并按 Id 精确校验可空来源销售订单
 /// （必须既有 / 未删除 / 未取消 / 客户一致 / 币种兼容；空来源保留历史「未关联来源」语义，绝不按文本猜测）。</para>
 /// <para>存在未删除且未取消的引用付款单时拒绝取消 / 删除或修改客户 / 来源 / 币种 / 金额 / 汇率（显式取消的付款单释放
 /// 限制但历史与审计原样保留）。修改 / 提交 / 审核 / 取消 / 删除五个动作都在同一事务内先取申请单行锁
@@ -428,6 +436,12 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
 /// <see cref="FinancePaymentApplyLifecycleRules.EnsurePersistedApplyConsistentAsync"/> 在既有申请单行锁内复核
 /// **已持久化**金额的同一口径。极大正金额（取整进位越过单列上限 / <c>1e16</c> / 极大十进制）在触及单号与任何
 /// 表头 / 来源 / 状态写入之前即被受控拒绝（零写入、零占号、零状态变化）；历史读取 / 取消 / 删除语义不变。</para>
+/// <para>ERP-517：创建 / 修改在**单号预约与任何写入之前**，对按既有 6 位小数归一化后的汇率另加汇率列实际存储精度
+/// （<c>DECIMAL(18,2)</c>，EF 模型未显式 <c>HasPrecision</c>）校验：极小正汇率（归一化为 0）、真实列会静默收敛为
+/// <c>0.00</c> / 改写小数位的正汇率与超出 <c>DECIMAL(18,2)</c> 的极大汇率一律受控拒绝（零表头 / 来源 / 状态写入、
+/// 零占号）；提交 / 审核经 <see cref="FinancePaymentApplyLifecycleRules.EnsurePersistedApplyConsistentAsync"/> 在既有
+/// 申请单行锁内复核**已持久化**汇率的同一口径，非法历史快照只被拒绝、绝不静默修复 / 改写；
+/// 历史读取 / 取消 / 删除不新增任何草稿有效性闸门。</para>
 /// </summary>
 [Route("api/finance/payment-applies")]
 public class FinancePaymentApplyController : DocumentControllerBase<FinancePaymentApply>

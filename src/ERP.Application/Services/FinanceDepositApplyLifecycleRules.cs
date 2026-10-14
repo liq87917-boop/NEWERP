@@ -11,9 +11,16 @@ namespace ERP.Application.Services;
 /// 取消 / 删除与读取，统一到同一条「实时启用身份 / 定金申请单（<c>deposit-apply</c>）菜单 / 当前权威客户数据范围 +
 /// 来源销售订单行锁 + 定金申请单行锁」的可串行化口径上。
 /// <para><b>商业字段完整性</b>：创建与修改校验真实可用客户（存在、未删除、启用）、受支持币种、按币种精度取整后大于 0
-/// 的金额、大于 0 的汇率；可空的 <see cref="FinanceDepositApply.SalesOrderId"/> 必须按 Id 精确解析到既有、未删除、
+/// 且可被金额列实际存储精度（<c>DECIMAL(18,2)</c>）原样存储的金额、大于 0 且可被汇率列实际存储精度
+/// （<c>DECIMAL(18,2)</c>，见 <see cref="FinancePersistedAmountRules"/>）原样保存的汇率；可空的
+/// <see cref="FinanceDepositApply.SalesOrderId"/> 必须按 Id 精确解析到既有、未删除、
 /// 未取消、客户与本申请单一致且币种兼容的销售订单（绝不按单号文本、金额或相似度猜测来源）；历史「未关联来源」
 /// （<c>SalesOrderId == null</c>）语义原样保留，只拒绝悬空 / 越界 / 不兼容的伪造链接。</para>
+/// <para><b>ERP-517</b>：既有「6 位小数归一化」汇率语义原样保留，创建 / 修改在**单号预约与任何写入之前**另加
+/// 汇率列存储边界判定（归一化为 0 的极小正汇率、真实列会静默收敛为 <c>0.00</c> / 改写小数位的正汇率、超出
+/// <c>DECIMAL(18,2)</c> 的极大汇率一律受控拒绝）；提交 / 审核经
+/// <see cref="EnsurePersistedApplyConsistentAsync"/> 在既有来源订单行锁 + 申请单行锁内复核**已持久化**汇率的同一口径，
+/// 但不改写任何历史快照；历史读取 / 取消 / 删除不新增任何草稿有效性闸门。</para>
 /// <para><b>与销售订单取消证据护栏协同</b>：定金申请单以 <c>SalesOrderId</c> 显式指向销售订单，属于既有「收款申请」
 /// 权威引用；只要仍存在<strong>未删除且未取消</strong>的定金申请单指向某销售订单，
 /// <see cref="SalesOrderCancellationRules"/> 就拒绝取消该销售订单。本护栏在修改 / 提交 / 审核 / 取消 / 删除时
@@ -41,7 +48,7 @@ public static class FinanceDepositApplyLifecycleRules
     public const string RuleText =
         "定金申请单生命周期护栏：创建 / 修改 / 提交 / 审核 / 取消 / 删除与读取都会重新校验当前实时启用身份、" +
         "定金申请单（deposit-apply）菜单授权与当前权威客户数据范围；" +
-        "创建与修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 且落在金额列实际存储精度（DECIMAL(18,2)）内的金额与大于 0 的汇率；" +
+        "创建与修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 且落在金额列实际存储精度（DECIMAL(18,2)）内的金额与大于 0 且可被汇率列实际存储精度（DECIMAL(18,2)）原样保存的汇率；" +
         "提供销售订单 Id 时按 Id 精确解析既有、未删除、未取消、客户一致且币种兼容的来源订单（绝不按文本或金额猜测来源），" +
         "历史未关联来源（空来源）语义原样保留；" +
         "修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取来源销售订单行锁、再取定金申请单行锁，" +
@@ -142,12 +149,28 @@ public static class FinanceDepositApplyLifecycleRules
     public static decimal AuthoritativeApplyAmount(decimal amount, string? currency)
         => CurrencyAmountRules.RoundAmount(amount, currency);
 
-    /// <summary>汇率校验（服务端权威）：必须大于 0；返回按 <see cref="ExchangeRateDecimals"/> 取整后的汇率。</summary>
+    /// <summary>
+    /// 汇率校验（服务端权威，ERP-517）：必须大于 0；按 <see cref="ExchangeRateDecimals"/> 位小数取整（0.5 进位）
+    /// 后仍必须大于 0，且归一化结果必须可被汇率列实际存储精度（<c>DECIMAL(18,2)</c>，EF 模型未显式
+    /// <c>HasPrecision</c>，见 <see cref="FinancePersistedAmountRules"/>）**原样**保存 ——
+    /// 返回归一化后的汇率。
+    /// <para>既有「6 位小数归一化」语义（含 <c>AwayFromZero</c>）**原样保留**，本方法只在归一化之后**另加**
+    /// 存储边界判定：极小正汇率（归一化为 <c>0.000000</c>）、真实列会静默收敛为 <c>0.00</c> / 改写小数位的正汇率
+    /// （例如 <c>0.001</c>、<c>1.234568</c>）与超出 <c>DECIMAL(18,2)</c> 的极大汇率（含 CLR 刻度 / 范围溢出）
+    /// 都在**单号预约与任何写入之前**受控拒绝（<c>InvalidParameter</c>，零表头 / 来源 / 状态写入、零占号）；
+    /// 绝不静默接受更粗的小数位、绝不静默归零，也不做任何汇率换算、不推断汇率、不改写历史快照。</para>
+    /// </summary>
     public static decimal NormalizeExchangeRate(decimal exchangeRate)
     {
         if (exchangeRate <= 0m)
             throw BusinessException.InvalidParameter($"汇率必须大于 0：当前值 {exchangeRate}");
-        return Math.Round(exchangeRate, ExchangeRateDecimals, MidpointRounding.AwayFromZero);
+        var normalized = FinancePersistedAmountRules.SafeRoundRate(
+            exchangeRate, ExchangeRateDecimals, "汇率");
+        if (normalized <= 0m)
+            throw BusinessException.InvalidParameter(
+                $"汇率必须大于 0：当前值 {exchangeRate} 按 {ExchangeRateDecimals} 位小数取整后为 {normalized}"
+                + "（极小正汇率绝不静默归零）");
+        return FinancePersistedAmountRules.EnsureRateRepresentable(normalized, "汇率");
     }
 
     /// <summary>申请单汇率的权威口径（用于与历史汇率比对）</summary>
@@ -301,11 +324,12 @@ public static class FinanceDepositApplyLifecycleRules
 
     /// <summary>
     /// 用既有规则复核<strong>已持久化</strong>定金申请单的客户 / 币种 / 金额 / 汇率 / 来源链接一致性（只读，不写库、
-    /// 不新增审批要求）：客户必须存在、未删除且启用，币种必须在既有系统币种口径内，金额按币种精度取整后必须大于 0，
-    /// 汇率必须大于 0，关联销售订单（若存在）必须仍可按 Id 解析到既有、未删除、未取消、客户一致且币种兼容的订单；
-    /// 未关联销售订单的历史申请场景保持不变。
+    /// 不新增审批要求）：客户必须存在、未删除且启用，币种必须在既有系统币种口径内，金额按币种精度取整后必须大于 0
+    /// 且可被金额列实际存储精度（<c>DECIMAL(18,2)</c>）原样存储，汇率必须大于 0 且可被汇率列实际存储精度
+    /// （<c>DECIMAL(18,2)</c>，ERP-517）原样保存，关联销售订单（若存在）必须仍可按 Id 解析到既有、未删除、未取消、
+    /// 客户一致且币种兼容的订单；未关联销售订单的历史申请场景保持不变。
     /// <para>修改 / 提交 / 审核会在来源订单行锁与定金申请单行锁内、同一事务中调用本方法，防止在锁外被改写的非法
-    /// 持久化数据被流转放行。</para>
+    /// 持久化数据被流转放行；被拒的非法历史快照**原样保留、绝不静默修复 / 改写**，取消 / 删除等撤销路径不调用本方法。</para>
     /// </summary>
     public static async Task EnsurePersistedApplyConsistentAsync(IErpDbContext db, FinanceDepositApply apply)
     {

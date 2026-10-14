@@ -429,14 +429,16 @@ public class FinanceDepositApplyLifecycleTests
         var controller = BuildController(db, no);
         TestAuth.SetUser(controller, userId);
 
-        // CNY 2 位：100.456 → 100.46
+        // CNY 2 位：100.456 → 100.46；汇率仍按既有 6 位小数归一化（1.25000004 → 1.25），且归一化结果必须可被
+        // 汇率列实际存储精度 DECIMAL(18,2) 原样保存（ERP-517：归一化后不可原样落库的汇率在单号 / 写入之前受控拒绝，
+        // 见 FinanceApplyPersistedRateTests）。
         var result = Assert.IsType<OkObjectResult>(await controller.Create(
-            NewApplyRequest(customer.Id, amount: 100.456m, salesOrderId: order.Id, exchangeRate: 1.23456789m)));
+            NewApplyRequest(customer.Id, amount: 100.456m, salesOrderId: order.Id, exchangeRate: 1.25000004m)));
         Assert.NotNull(result.Value);
 
         var stored = Assert.Single(db.FinanceDepositApplies.AsNoTracking().ToList());
         Assert.Equal(100.46m, stored.Amount);
-        Assert.Equal(1.234568m, stored.ExchangeRate);
+        Assert.Equal(1.25m, stored.ExchangeRate);
         Assert.Equal(Currency.CNY, stored.Currency);
         Assert.Equal(order.Id, stored.SalesOrderId);
         Assert.Equal(DocumentStatus.Pending, stored.Status);

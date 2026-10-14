@@ -3,17 +3,22 @@ using ERP.Application.Common;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 财务单据「单个标量金额列」的**实际存储边界**口径（ERP-508；收款单 / 定金申请单写入与提交 / 审核共用，
+/// 财务单据「单个标量金额列 / 汇率列」的**实际存储边界**口径（ERP-508；收款单 / 定金申请单写入与提交 / 审核共用，
 /// 后续付款类单据可直接复用，系统内不允许出现第二套标量金额边界规则）：
 /// <list type="number">
 /// <item>这些单据的金额列在 EF 模型中**未**显式 <c>HasPrecision</c>，因此按 EF 默认精度落库为
 /// <c>DECIMAL(18,2)</c>（16 位整数 + 2 位小数）；超出该区间的正金额能通过「大于 0」检查，却会在
 /// SQL 写入时截断 / 溢出，因此必须在落库之前拒绝（<b>绝不静默截断或取整</b>）；</item>
-/// <item>本类只对**已按币种精度取整后的单个标量金额**做区间判定，绝不重新取整、绝不改写调用方的取整口径
-/// （币种取整仍唯一由 <see cref="CurrencyAmountRules.RoundAmount"/> 按 <c>AwayFromZero</c> 完成，
-/// 零小数币种 <c>JPY / KRW / VND / IDR</c> 语义原样保留）；</item>
+/// <item>ERP-517：定金申请单 / 货款申请单的**汇率列**同样未显式 <c>HasPrecision</c>（实际 <c>DECIMAL(18,2)</c>），
+/// 因此「已按既有 6 位小数归一化」的汇率还必须能**原样**通过该列往返：极小正汇率（归一化为 0）、真实列会收敛为
+/// <c>0.00</c> 或改写小数位的正汇率、以及超出 <c>DECIMAL(18,2)</c> 的极大汇率一律受控拒绝
+/// （<see cref="EnsureRateRepresentable"/>），绝不静默接受更粗的小数位，也不做任何汇率换算；</item>
+/// <item>本类只对**已按业务口径取整后的单个标量**（金额 / 归一化汇率）做区间判定，绝不重新取整、绝不改写调用方的
+/// 取整口径（币种取整仍唯一由 <see cref="CurrencyAmountRules.RoundAmount"/> 按 <c>AwayFromZero</c> 完成，
+/// 零小数币种 <c>JPY / KRW / VND / IDR</c> 语义原样保留；汇率归一化仍唯一由各生命周期规则按既有
+/// <c>ExchangeRateDecimals</c> 完成）；</item>
 /// <item>边界：本类只做**纯判定**，不访问数据库、不写库、不涉及任何单据状态；且**绝不**用于聚合报表合计、
-/// 只读权威余额或权威历史金额比对 —— 那些求和 / 口径可能合法地超过单个存储列的容量。</item>
+/// 只读权威余额或权威历史金额 / 汇率比对 —— 那些求和 / 口径可能合法地超过单个存储列的容量。</item>
 /// </list>
 /// </summary>
 public static class FinancePersistedAmountRules
@@ -73,6 +78,63 @@ public static class FinancePersistedAmountRules
             throw BusinessException.InvalidParameter(
                 $"{amountLabel}{OverflowText}（当前值 {currencyRoundedAmount}）");
         return currencyRoundedAmount;
+    }
+
+    // ==================== 汇率列（DECIMAL(18,2)）存储边界（ERP-517） ====================
+
+    /// <summary>
+    /// 汇率超出实际存储精度时的拒绝文案（接口 / 文档同源）：定金申请单 / 货款申请单的汇率列在 EF 模型中同样
+    /// **未**显式 <c>HasPrecision</c>，按 EF SQL Server 默认精度落库为 <c>DECIMAL(18,2)</c>
+    /// （与 <see cref="DecimalPrecision"/> / <see cref="DecimalScale"/> 同源）。
+    /// </summary>
+    public const string ExchangeRateOverflowText =
+        "汇率必须大于 0 且可按汇率列实际存储精度（DECIMAL(18,2)）原样保存：已拒绝，绝不静默取整 / 归零或改写（不做汇率换算）";
+
+    /// <summary>
+    /// 受控汇率归一化：按 <paramref name="scale"/> 位小数（0.5 进位，与既有 <c>AwayFromZero</c> 口径同向）取整；
+    /// CLR 十进制刻度 / 范围溢出（<see cref="OverflowException"/>）一律转换为受控业务错误
+    /// （<c>InvalidParameter</c>）—— 绝不以未处理异常崩溃，也绝不静默截断 / 改写。
+    /// <para>纯计算：不访问数据库、不改写任何状态、不做任何汇率换算；调用方必须在单号预约与任何写入之前调用，
+    /// 并在归一化之后另行判定「结果是否仍大于 0 且可被汇率列原样保存」。</para>
+    /// </summary>
+    public static decimal SafeRoundRate(decimal rawExchangeRate, int scale, string rateLabel)
+    {
+        ArgumentNullException.ThrowIfNull(rateLabel);
+        ArgumentOutOfRangeException.ThrowIfNegative(scale);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(scale, 28);
+        try
+        {
+            return decimal.Round(rawExchangeRate, scale, MidpointRounding.AwayFromZero);
+        }
+        catch (OverflowException)
+        {
+            throw BusinessException.InvalidParameter(
+                $"{rateLabel}归一化溢出（当前值 {rawExchangeRate} 超出十进制可表示范围）：已拒绝，绝不静默截断或取整");
+        }
+    }
+
+    /// <summary>
+    /// 值（已按既有 6 位小数归一化的汇率）是否可在汇率列实际存储精度 <c>DECIMAL(18,2)</c> 内**原样**表示：
+    /// 必须为正，且小数位不超过 2、绝对值有界（与金额列共用同一区间常量）。
+    /// <para>纯判定：不取整、不换算、绝不改写调用方的归一化结果。正汇率 <c>0.001</c> / <c>1.234568</c> 会被真实列
+    /// 分别收敛为 <c>0.00</c> / <c>1.23</c>，因此**不可**表示（绝不静默接受更粗的小数位）。</para>
+    /// </summary>
+    public static bool IsRateRepresentable(decimal normalizedExchangeRate)
+        => normalizedExchangeRate > 0m && IsRepresentable(normalizedExchangeRate);
+
+    /// <summary>
+    /// 校验（并按原值返回）一个**已按既有 6 位小数归一化**的汇率可在汇率列内原样保存；否则抛受控业务错误
+    /// （<c>InvalidParameter</c>，文案含 <c>DECIMAL(18,2)</c>）。
+    /// <para>纯函数：不取整入参、不截断、不做任何汇率换算、不推断汇率，也绝不改写调用方的归一化结果；
+    /// 创建 / 修改在**单号预约与任何写入之前**调用，提交 / 审核在既有行锁内复核**已持久化**汇率。</para>
+    /// </summary>
+    public static decimal EnsureRateRepresentable(decimal normalizedExchangeRate, string rateLabel)
+    {
+        ArgumentNullException.ThrowIfNull(rateLabel);
+        if (!IsRateRepresentable(normalizedExchangeRate))
+            throw BusinessException.InvalidParameter(
+                $"{rateLabel}{ExchangeRateOverflowText}（当前值 {normalizedExchangeRate}）");
+        return normalizedExchangeRate;
     }
 
     /// <summary>
