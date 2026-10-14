@@ -435,6 +435,67 @@ public class FinanceBulkSettlementLifecycleTests
 
     // ==================== 3. 修改 / 提交 / 审核 / 取消 / 删除 ====================
 
+    [Theory]
+    [InlineData("just-over")]
+    [InlineData("round-up-cross")]
+    [InlineData("1e16")]
+    public async Task 创建_金额超出实际列精度_拒绝且零写入零占号(string scenario)
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, _, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C-515-A", "客户515A");
+        var no = new FakeDocumentNumberService();
+        var controller = BuildController(db, no);
+        TestAuth.SetUser(controller, userId);
+        var overLimit = scenario switch
+        {
+            "just-over" => 9_999_999_999_999_999.999m,
+            "round-up-cross" => 9_999_999_999_999_999.995m,
+            _ => 10_000_000_000_000_000m
+        };
+
+        // ERP-515：按既有精度取整之后、单号预约与任何写入之前，标量必须可在实际列精度 DECIMAL(18,2) 内原样存储。
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewRequest(customer.Id, totalAmount: overLimit)));
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewRequest(customer.Id, totalAmount: 100m, freightCost: overLimit)));
+
+        Assert.Equal(0, no.Calls);
+        Assert.Empty(db.FinanceBulkSettlements.AsNoTracking().ToList());
+
+        // 恰好等于上限照常落库并只消耗一次单号。
+        Assert.IsType<OkObjectResult>(await controller.Create(
+            NewRequest(customer.Id, totalAmount: 9_999_999_999_999_999.99m)));
+        Assert.Equal(1, no.Calls);
+        var stored = Assert.Single(db.FinanceBulkSettlements.AsNoTracking().ToList());
+        Assert.Equal(9_999_999_999_999_999.99m, stored.TotalAmount);
+    }
+
+    [Fact]
+    public async Task 修改_金额超出实际列精度_拒绝且原始字段审计不变()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, _, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C-515-UPD", "客户515UPD");
+        var settlement = SeedSettlement(db, "SJ-515-UPD", customer.Id, 1000m, 10m);
+        var before = StoredSettlement(db, settlement.Id);
+        var controller = BuildController(db, new FakeDocumentNumberService());
+        TestAuth.SetUser(controller, userId);
+
+        var request = NewRequest(customer.Id, totalAmount: 10_000_000_000_000_000m);
+        request.Remark = "SHOULD_NOT_BE_SAVED";
+        var ex = await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Update(settlement.Id, request));
+        Assert.Contains("DECIMAL(18,2)", ex.Message);
+        AssertSettlementUnchanged(db, before);
+        Assert.Equal("原始备注", StoredSettlement(db, settlement.Id).Remark);
+
+        var costRequest = NewRequest(customer.Id, totalAmount: 1000m, freightCost: 9_999_999_999_999_999.995m);
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Update(settlement.Id, costRequest));
+        AssertSettlementUnchanged(db, before);
+    }
+
     [Fact]
     public async Task 修改_仅待提交可改_且按既有精度取整()
     {
@@ -581,6 +642,20 @@ public class FinanceBulkSettlementLifecycleTests
         Assert.Throws<BusinessException>(() => FinanceBulkSettlementLifecycleRules.NormalizeTotalAmount(0.004m));
         Assert.Throws<BusinessException>(() => FinanceBulkSettlementLifecycleRules.NormalizeCost(-0.5m, "海运费"));
 
+        // ERP-515：取整之后复用既有标量存储边界（DECIMAL(18,2)）：半进位恰好上限放行、越界受控拒绝。
+        Assert.Equal(9_999_999_999_999_999.99m,
+            FinanceBulkSettlementLifecycleRules.NormalizeTotalAmount(9_999_999_999_999_999.985m));
+        Assert.Equal(9_999_999_999_999_999.99m,
+            FinanceBulkSettlementLifecycleRules.NormalizeCost(9_999_999_999_999_999.985m, "海运费"));
+        Assert.Throws<BusinessException>(() =>
+            FinanceBulkSettlementLifecycleRules.NormalizeTotalAmount(9_999_999_999_999_999.999m));
+        Assert.Throws<BusinessException>(() =>
+            FinanceBulkSettlementLifecycleRules.NormalizeCost(10_000_000_000_000_000m, "海运费"));
+        Assert.Throws<BusinessException>(() =>
+            FinanceBulkSettlementLifecycleRules.EnsurePersistedAmountsConsistent(12.345m, 0m));
+        Assert.Contains("DECIMAL(18,2)", FinanceBulkSettlementLifecycleRules.PersistedAmountStorageText);
+        Assert.Contains("DECIMAL(18,2)", FinanceBulkSettlementLifecycleRules.RuleText);
+
         // 客户范围：无权威归属 / 越界一律 fail closed，特权账号放行
         var restricted = new SalespersonDataScope
         {
@@ -625,6 +700,10 @@ public class FinanceBulkSettlementLifecycleTests
         Assert.Contains("LockSettlementRowAsync", controller);
         Assert.Contains("EnsureStoredSettlementScopeAllowedAsync", controller);
         Assert.Contains("EnsureCustomerInScope", controller);
+
+        // ERP-515：创建 / 修改复用既有归一化（含标量存储边界）；提交 / 审核在同一锁内只读复核已持久化金额。
+        Assert.Contains("NormalizeAmounts", controller);
+        Assert.Contains("EnsurePersistedAmountsConsistent", controller);
 
         // 散货结算单没有来源单据：绝不引入装柜清单行锁调用
         Assert.DoesNotContain("LockLoadingListRowsAsync(Db", controller[

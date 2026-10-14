@@ -24,6 +24,12 @@ namespace ERP.Application.Services;
 /// 0.5 进位）做正负校验：<see cref="FinanceBulkSettlement.TotalAmount"/> 必须大于 0，
 /// <see cref="FinanceBulkSettlement.FreightCost"/> 不得为负数。绝不发明汇率、绝不跨币种聚合，
 /// 也不施加 <c>total = freight</c> 之类的公式。</para>
+/// <para><b>标量存储边界（ERP-515）</b>：两个金额列在 EF 模型中<b>未</b>显式 <c>HasPrecision</c>，按 SQL Server 提供程序默认精度
+/// 落库为 <c>DECIMAL(18,2)</c>（16 位整数 + 2 位小数）；因此在既有两位小数取整<b>之后</b>，复用既有
+/// <see cref="FinancePersistedAmountRules"/> 判定每个标量可在该实际列精度内<b>原样</b>存储，过精度 / 溢出在单号预约与任何
+/// 写入之前受控拒绝（绝不静默截断 / 取整）。提交 / 审核在既有散货结算单行锁内对<b>已持久化</b>金额做同口径只读复核
+/// （<see cref="EnsurePersistedAmountsConsistent"/>）：只拒绝不可存储 / 精度不一致的值，绝不取整 / 截断 / 改写历史快照，
+/// 也不新增任何草稿有效性闸门（取消 / 删除等撤销路径保持既有语义）。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>；不落库、不改写单据（<see cref="LockSettlementRowAsync"/> 只刷新技术审计
 /// 时间戳以取得排它行锁）；「判定 + 写入」的原子性与同单并发串行化由调用方在同一事务内加锁完成。
 /// 本护栏不写库存 / 资金 / 会计，不产生任何记账、核销或流水。</para>
@@ -44,7 +50,10 @@ public static class FinanceBulkSettlementLifecycleRules
         "散货结算单（列表 / 详情 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除）在读取任何计数、单据号或写入之前，"
         + "都会重新校验实时启用身份（缺失 / 非法 / 已删除按未认证，禁用按权限不足）、既有「散货结算单」（bulk-settlement）菜单授权与当前权威客户数据范围；"
         + "结算客户必须真实启用且在范围内，读取 / 状态变更 / 删除前复核已存储客户归属（受限账号对无权威归属 fail closed）；"
-        + "结算总金额必须大于 0，海运费不得为负（只按既有存储精度校验，不换算、不跨币种聚合、不施加合计公式）；"
+        + "结算总金额必须大于 0，海运费不得为负，且两者按既有存储精度取整后还必须可在实际列精度 DECIMAL(18,2) 内原样存储"
+        + "（过精度 / 溢出一律在单号预约与任何写入之前受控拒绝，绝不静默截断 / 取整；不换算、不跨币种聚合、不施加合计公式）；"
+        + "提交 / 审核在既有行锁内对已持久化金额做同口径只读复核（不可存储 / 精度不一致即拒绝，绝不改写历史快照），"
+        + "取消 / 删除等撤销路径不新增草稿有效性闸门；"
         + "创建在生成单号与写入之前完成全部校验（失败绝不消耗单号）；修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取散货结算单行锁，"
         + "并在锁内重新复核身份 / 菜单 / 客户范围 / 状态 / 金额；失败整体回滚，历史与原始审计保持不变。";
 
@@ -53,7 +62,8 @@ public static class FinanceBulkSettlementLifecycleRules
         "本护栏只保护散货结算单生命周期与本单既有客户 / 金额字段：不新增菜单 / 角色 / 用户授权或表结构，也不把空身份当作管理员；"
         + "不写库存 / 库存流水 / 资金 / 会计凭证，不产生收款、付款、核销、分摊入账或对账结论；"
         + "散货结算单没有币种字段与来源单据，因此不做汇率换算、不跨币种聚合、不推断装运 / 订单来源；"
-        + "散货结算单的商业字段（日期 / 客户 / 金额 / 备注）与删除标记只在既有允许的状态流转下变更，绝不物理删除任一历史记录。";
+        + "散货结算单的商业字段（日期 / 客户 / 金额 / 备注）与删除标记只在既有允许的状态流转下变更，绝不物理删除任一历史记录；"
+        + "标量金额边界只作用于本单单个金额列（DECIMAL(18,2)），绝不施加到聚合求和 / 报表合计，也不引入第二套金额口径。";
 
     /// <summary>锁序文案（同单串行化：仅散货结算单行锁，无上游来源行）</summary>
     public const string LockOrderText =
@@ -83,35 +93,90 @@ public static class FinanceBulkSettlementLifecycleRules
 
     // ==================== 1. 金额纯校验（既有存储精度，不换算 / 不聚合 / 不施加合计公式） ====================
 
+    /// <summary>结算总金额标量标签（<see cref="FinanceBulkSettlement.TotalAmount"/>，接口 / 文档同源）</summary>
+    public const string TotalAmountLabel = "结算总金额";
+
+    /// <summary>海运费标量标签（<see cref="FinanceBulkSettlement.FreightCost"/>，接口 / 文档同源）</summary>
+    public const string FreightCostLabel = "海运费";
+
+    /// <summary>
+    /// 已持久化金额无法在**实际列精度**内原样存储时的拒绝文案（提交 / 审核锁内只读复核，接口 / 文档同源）：
+    /// 过精度（超过 2 位小数）与越界一律受控拒绝，绝不静默截断 / 取整 / 改写历史快照。
+    /// </summary>
+    public const string PersistedAmountStorageText =
+        "散货结算单已持久化金额必须可在实际列精度 DECIMAL(18,2) 内原样存储（至多 2 位小数且有界）：已拒绝，绝不静默截断或取整";
+
     /// <summary>
     /// 结算总金额校验：按既有存储精度（<see cref="AmountDecimals"/> 位小数，0.5 进位）取整后必须大于 0；返回取整后的值。
+    /// <para>ERP-515：取整之后、<b>单号预约与任何写入之前</b>，还要复用既有标量守卫
+    /// <see cref="FinancePersistedAmountRules.EnsureRepresentable"/> 判定可在实际列精度 <c>DECIMAL(18,2)</c> 内原样存储
+    /// （过精度 / 溢出受控拒绝，绝不静默截断 / 取整）；本方法只判定<b>单个标量</b>，
+    /// 不发明 <c>total = freight</c> 公式，也不做币种换算。</para>
     /// </summary>
     public static decimal NormalizeTotalAmount(decimal totalAmount)
     {
         var rounded = Math.Round(totalAmount, AmountDecimals, MidpointRounding.AwayFromZero);
         if (rounded <= 0m)
             throw BusinessException.InvalidParameter(
-                $"结算总金额必须大于 0：当前值 {totalAmount} 按既有存储精度（{AmountDecimals} 位小数）取整后为 {rounded}");
-        return rounded;
+                $"{TotalAmountLabel}必须大于 0：当前值 {totalAmount} 按既有存储精度（{AmountDecimals} 位小数）取整后为 {rounded}");
+        return FinancePersistedAmountRules.EnsureRepresentable(rounded, $"{TotalAmountLabel}按既有存储精度取整后");
     }
 
-    /// <summary>费用校验：按既有存储精度取整后不得为负数；返回取整后的值。</summary>
+    /// <summary>
+    /// 费用校验：按既有存储精度取整后不得为负数；返回取整后的值。
+    /// <para>ERP-515：取整之后、任何写入之前追加同一既有标量存储边界（<c>DECIMAL(18,2)</c>），
+    /// 过精度 / 溢出受控拒绝；零费用照常放行。</para>
+    /// </summary>
     public static decimal NormalizeCost(decimal cost, string label)
     {
         var rounded = Math.Round(cost, AmountDecimals, MidpointRounding.AwayFromZero);
         if (rounded < 0m)
             throw BusinessException.InvalidParameter($"{label}不能为负数：当前值 {cost}（按既有存储精度取整后为 {rounded}）");
-        return rounded;
+        return FinancePersistedAmountRules.EnsureRepresentable(rounded, $"{label}按既有存储精度取整后");
     }
 
     /// <summary>
-    /// 一次性校验散货结算单两个金额字段：总金额 &gt; 0，海运费 &gt;= 0，全部按既有存储精度取整。
+    /// 一次性校验散货结算单两个金额字段：总金额 &gt; 0，海运费 &gt;= 0，全部按既有存储精度取整，
+    /// 且每个标量取整后都必须可在实际列精度 <c>DECIMAL(18,2)</c> 内原样存储（ERP-515）。
     /// <para>明确<b>不</b>校验 <c>total == freight</c>：散货结算单没有币种字段，也没有既有的合计约束，
     /// 本护栏不发明任何计算公式。</para>
     /// </summary>
     public static (decimal TotalAmount, decimal FreightCost) NormalizeAmounts(
         decimal totalAmount, decimal freightCost)
-        => (NormalizeTotalAmount(totalAmount), NormalizeCost(freightCost, "海运费"));
+        => (NormalizeTotalAmount(totalAmount), NormalizeCost(freightCost, FreightCostLabel));
+
+    /// <summary>
+    /// 提交 / 审核在既有散货结算单行锁内对**已持久化**金额做只读一致性复核（ERP-515）：
+    /// 两个标量都必须能在实际列精度 <c>DECIMAL(18,2)</c> 内原样存储（至多 2 位小数且有界，复用既有
+    /// <see cref="FinancePersistedAmountRules.IsRepresentable"/>），并按既有语义要求
+    /// <see cref="TotalAmountLabel"/> &gt; 0、<see cref="FreightCostLabel"/> &gt;= 0。
+    /// <para>纯判定：绝不取整 / 截断 / 改写历史快照，绝不把精度不一致的存量值静默改写成可存储值；
+    /// 也绝不发明 <c>total = freight</c> 公式、不做币种换算、不施加任何聚合 / 报表合计上限。
+    /// 取消 / 删除等撤销路径<b>不调用</b>本方法（不新增草稿有效性闸门）。</para>
+    /// </summary>
+    public static void EnsurePersistedAmountsConsistent(decimal totalAmount, decimal freightCost)
+    {
+        EnsurePersistedAmountStorage(totalAmount, TotalAmountLabel);
+        EnsurePersistedAmountStorage(freightCost, FreightCostLabel);
+
+        if (totalAmount <= 0m)
+            throw BusinessException.InvalidParameter(
+                $"{TotalAmountLabel}必须大于 0：已持久化值 {totalAmount}（锁内复核，不取整、不改写）");
+        if (freightCost < 0m)
+            throw BusinessException.InvalidParameter(
+                $"{FreightCostLabel}不能为负数：已持久化值 {freightCost}（锁内复核，不取整、不改写）");
+    }
+
+    /// <summary>
+    /// 已持久化单标量的实际存储可表示性（只读、共用既有 <see cref="FinancePersistedAmountRules.IsRepresentable"/>）：
+    /// 过精度（超过 2 位小数）或越界一律受控拒绝（<c>InvalidParameter</c>），绝不取整 / 截断 / 改写。
+    /// </summary>
+    private static void EnsurePersistedAmountStorage(decimal amount, string label)
+    {
+        if (!FinancePersistedAmountRules.IsRepresentable(amount))
+            throw BusinessException.InvalidParameter(
+                $"{PersistedAmountStorageText}（{label}，当前值 {amount}）");
+    }
 
     // ==================== 2. 身份 / 菜单 / 客户数据范围（fail closed） ====================
 

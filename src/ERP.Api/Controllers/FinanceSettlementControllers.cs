@@ -367,6 +367,10 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
 /// <para>金额只按既有存储精度（<c>decimal(18,2)</c>，2 位小数）校验：总金额 &gt; 0，海运费 &gt;= 0；
 /// 散货结算单没有币种字段，因此不做任何汇率换算、跨币种聚合或 <c>total = freight</c> 公式，
 /// 也不按备注 / 文本推断装运 / 订单来源。</para>
+/// <para>ERP-515：创建 / 修改在既有两位小数取整<b>之后</b>、<b>单号预约与任何写入之前</b>，对两个标量复用既有
+/// <see cref="FinancePersistedAmountRules"/> 判定可在实际列精度 <c>DECIMAL(18,2)</c> 内原样存储（过精度 / 溢出受控拒绝，
+/// 绝不静默截断 / 取整）；提交 / 审核在既有散货结算单行锁内只读复核<b>已持久化</b>金额的同一口径
+/// （不可存储 / 精度不一致即拒绝，绝不改写历史快照），取消 / 删除等撤销路径不新增草稿有效性闸门。</para>
 /// <para>修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取散货结算单行锁，锁内重新加载并复核权威状态 / 客户 / 金额；
 /// 失败整体回滚（状态、原始字段与审计不变）。创建在生成单号与写入之前完成全部校验（失败绝不消耗单号）。</para>
 /// <para>本护栏不写库存 / 资金 / 会计，不产生收款、付款、核销、分摊入账或任何流水，只做软删除。</para>
@@ -587,8 +591,11 @@ public class FinanceBulkSettlementController : DocumentControllerBase<FinanceBul
 
             if (validateAmounts)
             {
-                // 锁内复核持久化金额仍满足既有口径（历史合法数据原样保留，绝不改写）。
-                FinanceBulkSettlementLifecycleRules.NormalizeAmounts(entity.TotalAmount, entity.FreightCost);
+                // ERP-515：锁内只读复核已持久化金额仍可在实际列精度 DECIMAL(18,2) 内原样存储且满足既有正负口径
+                // （历史合法数据原样保留，绝不取整 / 截断 / 改写；取消等撤销路径 validateAmounts=false，
+                // 不新增草稿有效性闸门）。
+                FinanceBulkSettlementLifecycleRules.EnsurePersistedAmountsConsistent(
+                    entity.TotalAmount, entity.FreightCost);
             }
 
             SetStatus(entity, to);

@@ -747,6 +747,36 @@ public class FinanceSettlementCanonicalEntryTests
     }
 
     [Theory]
+    [InlineData("justOver")]
+    [InlineData("roundUpCrossing")]
+    [InlineData("oneE16")]
+    public async Task 超出存储精度金额_散货结算单创建拒绝_零写入零占号(string scenario)
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, _, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C-515-OVF", "客户515OVF");
+        var no = new FakeDocumentNumberService();
+        var controller = BuildBulkController(db, no);
+        TestAuth.SetUser(controller, userId);
+
+        // ERP-515：按既有精度取整之后、单号预约与任何写入之前，金额必须可在实际列精度 DECIMAL(18,2) 内原样存储。
+        var overLimit = scenario switch
+        {
+            "justOver" => 9_999_999_999_999_999.999m,
+            "roundUpCrossing" => 9_999_999_999_999_999.995m,
+            _ => 10_000_000_000_000_000m
+        };
+
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewBulkRequest(customer.Id, totalAmount: overLimit)));
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewBulkRequest(customer.Id, totalAmount: 100m, freightCost: overLimit)));
+
+        Assert.Equal(0, no.Calls);
+        Assert.Empty(db.FinanceBulkSettlements.AsNoTracking().ToList());
+    }
+
+    [Theory]
     [InlineData("dangling")]
     [InlineData("deleted")]
     [InlineData("cancelled")]
