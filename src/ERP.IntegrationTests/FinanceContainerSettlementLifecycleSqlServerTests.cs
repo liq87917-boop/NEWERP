@@ -314,6 +314,25 @@ public sealed class FinanceContainerSettlementLifecycleSqlServerTests
                              && s.Status != DocumentStatus.Cancelled);
     }
 
+    /// <summary>装柜结算单单号序列（<c>SysDocumentNumberRules</c>，证明被拒请求零占号）。</summary>
+    private async Task<long> SettlementSequenceAsync()
+    {
+        await using var db = _fixture.CreateDbContext();
+        return await db.SysDocumentNumberRules.AsNoTracking()
+            .Where(r => r.DocumentType == DocumentType.ContainerSettlement && !r.IsDeleted)
+            .Select(r => r.CurrentSequence).SingleAsync();
+    }
+
+    /// <summary>本用例名下最新的未删除装柜结算单（同一装柜清单维度，读侧只读）。</summary>
+    private async Task<FinanceContainerSettlement?> LatestSettlementForListAsync(long loadingListId)
+    {
+        await using var db = _fixture.CreateDbContext();
+        return await db.FinanceContainerSettlements.AsNoTracking()
+            .Where(s => s.LoadingListId == loadingListId && !s.IsDeleted)
+            .OrderByDescending(s => s.Id)
+            .FirstOrDefaultAsync();
+    }
+
     /// <summary>既有资金 / 库存记账表条数合计：本护栏绝不产生任何新的收款 / 付款 / 费用 / 库存流水。</summary>
     private async Task<int> PostingRowCountAsync()
     {
@@ -511,6 +530,98 @@ public sealed class FinanceContainerSettlementLifecycleSqlServerTests
         Assert.Equal(DocumentStatus.Cancelled, retained.Status);
         Assert.False(retained.IsDeleted);
         Assert.Equal(postingsBefore, await PostingRowCountAsync());
+    }
+
+    // ==================== 3-b. 标量金额存储边界（ERP-514） ====================
+
+    /// <summary>
+    /// 真实 SQL + 真实授权身份：手工与显式链接来源的越界 / 过精度金额在**单号预约与任何写入之前**受控拒绝
+    /// （零表头写入、零单号序列消耗、来源清单零改写、既有结算单逐字段审计不变）；恰好等于上限的金额照常
+    /// 「创建 → 提交 → 审核」并在真实 <c>decimal(18,2)</c> 列上原样持久化。
+    /// </summary>
+    [Fact]
+    public async Task Controller_AmountsBeyondStorageBounds_DeniedWithoutNumberingOrWrite_AndBoundaryAmountPersists()
+    {
+        Guard();
+        var tag = Tag();
+        long userId, customerId, loadingListId, pendingId;
+
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var customer = await SeedCustomerAsync(seed, $"INT_E514_A_{tag}", "金额边界客户");
+            customerId = customer.Id;
+            userId = (await SeedOperatorAsync(seed, customer.Id)).UserId;
+            loadingListId = (await SeedLoadingListAsync(
+                seed, $"INT_E514_LG_{tag}", $"TCLU-A-{tag}", customer.Id)).Id;
+            pendingId = (await SeedSettlementAsync(
+                seed, $"INT_E514_SP_{tag}", null, customer.Id, 1000m, 10m, 5m)).Id;
+        }
+
+        var sequenceBefore = await SettlementSequenceAsync();
+        var pendingBefore = await ReloadSettlementAsync(pendingId);
+
+        // 手工（未关联来源）溢出总金额：受控拒绝且零单号消耗。
+        var manual = await TrySettlementActionAsync(userId, c => c.Create(new FinanceContainerSettlement
+        {
+            CustomerId = customerId,
+            SettlementDate = DateTime.Today,
+            TotalAmount = 10_000_000_000_000_000m
+        }));
+        Assert.False(manual.Success, manual.Error);
+        Assert.Contains("DECIMAL(18,2)", manual.Error);
+        Assert.Equal(sequenceBefore, await SettlementSequenceAsync());
+
+        // 显式链接来源 + 取整进位越过上限的其他费用：拒绝且来源清单与结算单集合零变化。
+        var linked = await TrySettlementActionAsync(userId, c => c.Create(new FinanceContainerSettlement
+        {
+            CustomerId = customerId,
+            SettlementDate = DateTime.Today,
+            LoadingListId = loadingListId,
+            TotalAmount = 100m,
+            OtherCost = 9_999_999_999_999_999.995m
+        }));
+        Assert.False(linked.Success, linked.Error);
+        Assert.Contains("DECIMAL(18,2)", linked.Error);
+        Assert.Equal(sequenceBefore, await SettlementSequenceAsync());
+        Assert.Equal(0, await LiveSettlementCountAsync(loadingListId));
+        Assert.Equal(DocumentStatus.Pending, await ReloadLoadingListStatusAsync(loadingListId));
+
+        // 修改溢出金额：拒绝且既有结算单逐字段（含审计时间戳）不变。
+        var update = await TrySettlementActionAsync(userId, c => c.Update(pendingId, new FinanceContainerSettlement
+        {
+            CustomerId = customerId,
+            SettlementDate = DateTime.Today,
+            TotalAmount = 10_000_000_000_000_000m,
+            Remark = "SHOULD_NOT_BE_SAVED"
+        }));
+        Assert.False(update.Success, update.Error);
+        Assert.Contains("DECIMAL(18,2)", update.Error);
+        var pendingAfter = await ReloadSettlementAsync(pendingId);
+        Assert.Equal(pendingBefore.TotalAmount, pendingAfter.TotalAmount);
+        Assert.Equal(pendingBefore.Remark, pendingAfter.Remark);
+        Assert.Equal(pendingBefore.Status, pendingAfter.Status);
+        Assert.Equal(pendingBefore.UpdatedAt, pendingAfter.UpdatedAt);
+
+        // 恰好等于上限的金额：照常创建 → 提交 → 审核，并原样落库。
+        var boundary = await TrySettlementActionAsync(userId, c => c.Create(new FinanceContainerSettlement
+        {
+            CustomerId = customerId,
+            SettlementDate = DateTime.Today,
+            LoadingListId = loadingListId,
+            TotalAmount = 9_999_999_999_999_999.99m
+        }));
+        Assert.True(boundary.Success, boundary.Error);
+        Assert.Equal(sequenceBefore + 1, await SettlementSequenceAsync());
+
+        var created = await LatestSettlementForListAsync(loadingListId);
+        Assert.NotNull(created);
+        Assert.Equal(9_999_999_999_999_999.99m, created!.TotalAmount);
+
+        var submitted = await TrySettlementActionAsync(userId, c => c.Submit(created.Id));
+        Assert.True(submitted.Success, submitted.Error);
+        var approved = await TrySettlementActionAsync(userId, c => c.Approve(created.Id));
+        Assert.True(approved.Success, approved.Error);
+        Assert.Equal(DocumentStatus.Approved, (await ReloadSettlementAsync(created.Id)).Status);
     }
 
     // ==================== 4. 两个独立连接竞态（装柜清单行锁 + 结算单行锁串行化） ====================

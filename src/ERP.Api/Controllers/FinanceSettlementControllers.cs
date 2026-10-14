@@ -16,6 +16,10 @@ namespace ERP.Api.Controllers;
 /// 复用 ERP-364 参与方 / 上游客户范围；空来源保留历史「未关联来源」语义，绝不按柜号 / 单号文本猜测）。
 /// <para>金额只按既有存储精度（<c>decimal(18,2)</c>，2 位小数）校验：总金额 &gt; 0，海运费 / 其他费用 &gt;= 0；
 /// 结算单没有币种字段，因此不做任何汇率换算、跨币种聚合或 <c>total = sum(costs)</c> 公式。</para>
+/// <para>ERP-514：创建 / 修改在既有两位小数取整<b>之后</b>、<b>单号预约与任何写入之前</b>，对三个标量复用既有
+/// <see cref="FinancePersistedAmountRules"/> 判定可在实际列精度 <c>DECIMAL(18,2)</c> 内原样存储（过精度 / 溢出受控拒绝，
+/// 绝不静默截断 / 取整）；提交 / 审核在既有来源清单行锁 + 结算单行锁内只读复核<b>已持久化</b>金额的同一口径
+/// （不可存储 / 精度不一致即拒绝，绝不改写历史快照），取消 / 删除等撤销路径不新增草稿有效性闸门。</para>
 /// <para>修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取来源装柜清单行锁、再取装柜结算单行锁（ERP-384 锁序：
 /// 先上游清单行、后结算单行），再加载权威状态 / 字段并在锁内复核身份 + 菜单授权 + 客户范围 + 状态 + 金额与来源链接；
 /// 失败整体回滚（状态、原始字段与审计不变）。存在未删除且未取消的结算单引用装柜清单时，装柜清单取消由
@@ -336,8 +340,9 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
 
             if (validateAmounts)
             {
-                // 锁内复核持久化金额仍满足既有口径（历史合法数据原样保留，绝不改写）。
-                FinanceContainerSettlementLifecycleRules.NormalizeAmounts(
+                // ERP-514：锁内只读复核已持久化金额仍可在实际列精度 DECIMAL(18,2) 内原样存储且满足既有正负口径
+                // （历史合法数据原样保留，绝不取整 / 截断 / 改写；取消等撤销路径 validateAmounts=false，不新增草稿有效性闸门）。
+                FinanceContainerSettlementLifecycleRules.EnsurePersistedAmountsConsistent(
                     entity.TotalAmount, entity.FreightCost, entity.OtherCost);
             }
 

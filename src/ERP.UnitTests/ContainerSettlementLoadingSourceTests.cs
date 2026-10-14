@@ -517,6 +517,41 @@ public class ContainerSettlementLoadingSourceTests
         Assert.Equal(ok.Id, stored.LoadingListId);
     }
 
+    // ==================== 7-b. 显式来源生成结算单：金额仍走同一既有标量存储边界（ERP-514） ====================
+
+    [Fact]
+    public async Task 显式来源生成结算单_金额仍走同一既有标量存储边界()
+    {
+        using var db = TestDbFactory.Create();
+        var customerA = SeedCustomer(db, "C-A-AMT", "客户A金额");
+        var userId = SeedOperator(db, customerA.Id);
+        var noService = new FakeDocumentNumberService();
+        var ctl = BuildController(db, userId, noService);
+        var source = SeedLoadingList(db, "CL-A-AMT", "TCNU-AMT", customerA.Id);
+
+        // 显式来源 + 溢出金额：候选选择不等于授权，金额仍在**单号预约与任何写入之前**受控拒绝
+        // （零写入、零占号，来源清单原样保留）。
+        await AssertCodeAsync(ErrorCodes.InvalidParameter,
+            () => ctl.Create(Request(customerA.Id, source.Id, 10_000_000_000_000_000m)));
+        await AssertCodeAsync(ErrorCodes.InvalidParameter,
+            () => ctl.Create(Request(customerA.Id, source.Id, 9_999_999_999_999_999.999m)));
+        Assert.Equal(0, noService.Calls);
+        Assert.Empty(db.FinanceContainerSettlements.AsNoTracking().ToList());
+
+        // 同一显式来源 + 恰好上限金额照常落库并只消耗一次单号。
+        Assert.IsType<OkObjectResult>(await ctl.Create(
+            Request(customerA.Id, source.Id, 9_999_999_999_999_999.99m)));
+        Assert.Equal(1, noService.Calls);
+        var stored = Assert.Single(db.FinanceContainerSettlements.AsNoTracking().ToList());
+        Assert.Equal(source.Id, stored.LoadingListId);
+        Assert.Equal(9_999_999_999_999_999.99m, stored.TotalAmount);
+
+        // 来源转成结算单时的金额边界与既有规则同源（绝不引入第二套标量边界）。
+        Assert.Contains("DECIMAL(18,2)", ContainerSettlementLoadingSourceService.SettlementAmountBoundaryText);
+        Assert.Contains("DECIMAL(18,2)", FinanceContainerSettlementLifecycleRules.RuleText);
+        Assert.Contains("DECIMAL(18,2)", FinanceContainerSettlementLifecycleRules.PersistedAmountStorageText);
+    }
+
     // ==================== 8. 源码契约：控制器 / 服务 / 前端接入 ====================
 
     private static string RepoFile(params string[] parts)

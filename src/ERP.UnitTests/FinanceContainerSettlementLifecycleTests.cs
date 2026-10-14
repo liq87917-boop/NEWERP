@@ -394,6 +394,20 @@ public class FinanceContainerSettlementLifecycleTests
         await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
             () => controller.Create(NewSettlementRequest(customer.Id, otherCost: -1m)));
 
+        // ERP-514：按既有精度取整之后、单号预约与任何写入之前，三个标量还必须可在实际列精度
+        // DECIMAL(18,2) 内原样存储（取整进位越过上限 / 1e16 / 极大十进制一律受控拒绝，绝不静默截断 / 取整）。
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewSettlementRequest(
+                customer.Id, totalAmount: 9_999_999_999_999_999.999m)));
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewSettlementRequest(
+                customer.Id, totalAmount: 10_000_000_000_000_000m)));
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewSettlementRequest(
+                customer.Id, freightCost: 9_999_999_999_999_999.995m)));
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
+            () => controller.Create(NewSettlementRequest(customer.Id, otherCost: decimal.MaxValue)));
+
         Assert.Equal(0, no.Calls);
         Assert.Empty(db.FinanceContainerSettlements.AsNoTracking().ToList());
     }
@@ -659,6 +673,18 @@ public class FinanceContainerSettlementLifecycleTests
 
         await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter, () => controller.Submit(legacyZero.Id));
         AssertSettlementUnchanged(db, legacyZero);
+
+        // ERP-514：已持久化金额过精度（不可原样存储）或越界时，锁内只读复核一律拒绝且状态 / 字段 / 审计不变
+        // （绝不静默取整 / 截断改写历史快照）。
+        var legacyOverflow = SeedSettlement(db, "ZGS-OVF", null, customer.Id, 10_000_000_000_000_000m);
+        var legacyPrecision = SeedSettlement(db, "ZGS-PRE", null, customer.Id, 12.345m,
+            status: DocumentStatus.Submitted);
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter, () => controller.Submit(legacyOverflow.Id));
+        AssertSettlementUnchanged(db, legacyOverflow);
+        Assert.Equal(DocumentStatus.Pending, StoredSettlement(db, legacyOverflow.Id).Status);
+        await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter, () => controller.Approve(legacyPrecision.Id));
+        AssertSettlementUnchanged(db, legacyPrecision);
+        Assert.Equal(DocumentStatus.Submitted, StoredSettlement(db, legacyPrecision.Id).Status);
     }
 
     [Fact]
@@ -874,6 +900,19 @@ public class FinanceContainerSettlementLifecycleTests
         Assert.Throws<BusinessException>(() => FinanceContainerSettlementLifecycleRules.NormalizeTotalAmount(0.004m));
         Assert.Throws<BusinessException>(() => FinanceContainerSettlementLifecycleRules.NormalizeCost(-0.5m, "海运费"));
 
+        // ERP-514：取整之后复用既有标量存储边界（DECIMAL(18,2)）：半进位恰好上限放行、越界受控拒绝。
+        Assert.Equal(9_999_999_999_999_999.99m,
+            FinanceContainerSettlementLifecycleRules.NormalizeTotalAmount(9_999_999_999_999_999.985m));
+        Assert.Equal(9_999_999_999_999_999.99m,
+            FinanceContainerSettlementLifecycleRules.NormalizeCost(9_999_999_999_999_999.985m, "其他费用"));
+        Assert.Throws<BusinessException>(() =>
+            FinanceContainerSettlementLifecycleRules.NormalizeTotalAmount(9_999_999_999_999_999.999m));
+        Assert.Throws<BusinessException>(() =>
+            FinanceContainerSettlementLifecycleRules.NormalizeCost(10_000_000_000_000_000m, "海运费"));
+        Assert.Contains("DECIMAL(18,2)", FinanceContainerSettlementLifecycleRules.PersistedAmountStorageText);
+        Assert.Contains("DECIMAL(18,2)", FinanceContainerSettlementLifecycleRules.RuleText);
+        Assert.Contains("撤销", FinanceContainerSettlementLifecycleRules.RuleText);
+
         // 锁 Id：去重、剔除非正、按 Id 升序
         var ids = FinanceContainerSettlementLifecycleRules.MergeLoadingListLockIds(5, null, 3, 5, 0, -1);
         Assert.Equal(new long[] { 3, 5 }, ids);
@@ -908,6 +947,10 @@ public class FinanceContainerSettlementLifecycleTests
         Assert.Contains("MergeLoadingListLockIds", controller);
         Assert.Contains("EnsureStoredSettlementScopeAllowedAsync", controller);
         Assert.Contains("EnsureEvidenceCustomersInScopeAsync", controller);
+
+        // ERP-514：创建 / 修改复用既有归一化（含标量存储边界）；提交 / 审核在同一锁内只读复核已持久化金额。
+        Assert.Contains("NormalizeAmounts", controller);
+        Assert.Contains("EnsurePersistedAmountsConsistent", controller);
 
         // 装柜清单取消协同：未取消结算单阻断取消
         Assert.Contains("EnsureNoActiveSettlementForLoadingListAsync", loadingController);

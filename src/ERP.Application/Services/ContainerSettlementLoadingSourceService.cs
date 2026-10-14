@@ -23,6 +23,11 @@ namespace ERP.Application.Services;
 /// 也绝不发明任何金额公式；显式选择后的最终保存仍由调用方按
 /// <see cref="FinanceContainerSettlementLifecycleRules.ResolveAndAuthorizeLoadingListAsync"/>（ERP-384 锁内复核）
 /// 精确解析来源并复核客户资格。</para>
+/// <para><b>来源转成结算单时的金额边界（ERP-514）</b>：显式选定来源只回填<b>权威装柜清单 Id</b>；该请求真正生成装柜结算单时，
+/// 金额仍走<b>同一</b>既有边界（<see cref="FinanceContainerSettlementLifecycleRules.NormalizeAmounts"/> 的两位小数取整
+/// → 既有 <see cref="FinancePersistedAmountRules"/> 的 <c>DECIMAL(18,2)</c> 原样存储判定，见
+/// <see cref="SettlementAmountBoundaryText"/>），在单号预约与任何写入之前受控拒绝过精度 / 溢出值；
+/// 本只读候选服务<b>绝不</b>引入第二套金额边界，也绝不返回或猜测任何金额。</para>
 /// </summary>
 public static class ContainerSettlementLoadingSourceService
 {
@@ -55,6 +60,17 @@ public static class ContainerSettlementLoadingSourceService
         "已存储来源按装柜结算单权威客户做实时身份 / 菜单 / 客户数据范围复核后显式标注"
         + "（未关联 / 已关联 / 来源已取消 / 来源不可用）；历史已取消 / 不可用来源原样保留、只读可读，"
         + "绝不静默清除或重绑定。";
+
+    /// <summary>
+    /// 显式来源转成装柜结算单时的金额边界文案（ERP-514，接口 / 文档同源）：显式来源只回填权威装柜清单 Id，
+    /// 金额仍唯一由既有 <see cref="FinanceContainerSettlementLifecycleRules.NormalizeAmounts"/>（两位小数取整 →
+    /// 既有 <see cref="FinancePersistedAmountRules"/> 的 <c>DECIMAL(18,2)</c> 原样存储判定）在单号预约与任何写入之前校验；
+    /// 本只读候选服务绝不返回金额，也绝不引入第二套金额边界。
+    /// </summary>
+    public const string SettlementAmountBoundaryText =
+        "显式来源只回填权威装柜清单 Id：来源转成装柜结算单时金额仍走同一既有边界"
+        + "（按既有存储精度取整后判定可在实际列精度 DECIMAL(18,2) 内原样存储，过精度 / 溢出在单号预约与任何写入之前受控拒绝），"
+        + "候选查询本身绝不返回金额、汇率或跨币种合计，也绝不猜测来源。";
 
     /// <summary>关键字归一化：去首尾空白并截断到 <see cref="MaxKeywordLength"/>（先归一化再计数 / 匹配）。</summary>
     public static string NormalizeKeyword(string? keyword)
