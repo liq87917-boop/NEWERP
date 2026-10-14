@@ -1,0 +1,66 @@
+{
+  "title": "Persist purchase-quote quantity, unit price and recomputed total at their declared four-decimal precision",
+  "description": "Stage 3 procurement guard for the supplier comparison register. db_owner.PurchaseQuotes is created by the existing authoritative script with Quantity DECIMAL(18,4), QuotePrice DECIMAL(18,4) and TotalAmount DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:452-500, QuotePrice at 466), and src/ERP.Application/Services/PurchaseQuoteMutationRules.cs declares EF precision 18/4 (DecimalPrecision :58, DecimalScale :61, MaxDecimal18Scale4 :64, IsRepresentable :253, CalculateTotalAmount :257, ValidateDraft :288-323 with the quantity/price/total checks at :303-315). The EF model however declares no precision for PurchaseQuote (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs contains only the unique index for PurchaseQuotes and no Entity<PurchaseQuote> precision entry), so EF maps those three columns to decimal(18,2) and every server-normalized value, including the server recomputed total, is silently rounded to two decimals before it reaches SQL, while values with three or four decimal places are accepted by the guard. Declare the model mapping so it matches the existing column declaration (the same treatment already applied to BaseProductSupplier.MinOrderQty at ErpDbContext.Config.cs:90) and make the draft guard reject, never round, any quantity, unit price or recomputed total that cannot be stored verbatim at four decimals, before the row lock, document numbering and any write. Preserve the single authoritative recompute (unit price times quantity) and its currency rounding, the CNY/USD whitelist, status and IsSelected consistency, the server-owned QuoteNo/Status/Currency/TotalAmount normalization on create and update, the null-or-zero primary key, audit and soft-delete reset for create, the decision and conversion edit/delete freeze, and the deterministic Id-ascending row-lock protocol. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no production access and no secret or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL and browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "PurchaseQuote.Quantity, QuotePrice and the server recomputed TotalAmount are validated against the declared four-decimal persisted precision (absolute magnitude at most 99_999_999_999_999.9999 and at most four decimal places) after the existing authoritative recompute, and any over-scale or overflowing value is rejected with the existing controlled InvalidParameter errors instead of being silently rounded, while the EF mapping matches the declared columns so a valid four-decimal value round-trips verbatim.",
+    "Existing purchase-quote semantics are preserved unchanged: quantity strictly greater than zero, unit price greater than or equal to zero, only CNY and USD accepted, status and IsSelected consistency, server-owned QuoteNo, Status, Currency and TotalAmount normalization, null-or-zero key and audit reset on create, decision and conversion edit and delete freeze, and the deterministic Id-ascending row-lock order; a rejected write consumes no document number and changes no PurchaseQuote or PurchaseQuoteDecision row.",
+    "Unit boundary and precision cases plus a genuine isolated SQL round-trip cover exact four-decimal values, fifth-decimal rejection, the magnitude boundary, recompute overflow and unchanged rows on rejection, alongside the existing purchase-quote mutation, authorization and master-reference regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuotePersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuotePersistedNumericBoundsSqlServerTests.cs",
+    "docs/purchase-quote-persisted-numeric-bounds.md"
+  ],
+  "criterion_path_map": {
+    "PurchaseQuote.Quantity, QuotePrice and the server recomputed TotalAmount are validated against the declared four-decimal persisted precision (absolute magnitude at most 99_999_999_999_999.9999 and at most four decimal places) after the existing authoritative recompute, and any over-scale or overflowing value is rejected with the existing controlled InvalidParameter errors instead of being silently rounded, while the EF mapping matches the declared columns so a valid four-decimal value round-trips verbatim.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "docs/purchase-quote-persisted-numeric-bounds.md"
+    ],
+    "Existing purchase-quote semantics are preserved unchanged: quantity strictly greater than zero, unit price greater than or equal to zero, only CNY and USD accepted, status and IsSelected consistency, server-owned QuoteNo, Status, Currency and TotalAmount normalization, null-or-zero key and audit reset on create, decision and conversion edit and delete freeze, and the deterministic Id-ascending row-lock order; a rejected write consumes no document number and changes no PurchaseQuote or PurchaseQuoteDecision row.": [
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "docs/purchase-quote-persisted-numeric-bounds.md"
+    ],
+    "Unit boundary and precision cases plus a genuine isolated SQL round-trip cover exact four-decimal values, fifth-decimal rejection, the magnitude boundary, recompute overflow and unchanged rows on rejection, alongside the existing purchase-quote mutation, authorization and master-reference regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseQuotePersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuotePersistedNumericBoundsSqlServerTests.cs",
+      "docs/purchase-quote-persisted-numeric-bounds.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs:58-64 declares DecimalPrecision 18, DecimalScale 4 and MaxDecimal18Scale4, and :288-323 ValidateDraft accepts any value for which :253 IsRepresentable returns true, i.e. up to four decimals, while recomputing TotalAmount at :257/:313; src/ERP.Api/Controllers/PurchaseQuoteController.cs:152-169 (create, ValidateDraft then NormalizeForCreate) and :191-226 (update: LockQuoteRowAsync at :205 before ValidateDraft at :226) are the only write gates; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:452-500 creates Quantity, QuotePrice (:466) and TotalAmount as DECIMAL(18,4); src/ERP.Infrastructure/Data/ErpDbContext.Config.cs declares no precision for PurchaseQuote (only the unique index and no Entity<PurchaseQuote> property configuration), so EF maps all three columns to decimal(18,2) and silently rounds three and four decimal values; src/ERP.Domain/Entities/PurchaseQuote.cs:38,52,55 hold the three decimals with no precision attribute; the same divergence was already repaired for BaseProductSupplier.MinOrderQty at ErpDbContext.Config.cs:90 and asserted in src/ERP.UnitTests/ProductSupplierTests.cs:1167-1170. No existing task bounds PurchaseQuote storage precision: ERP-417 covers concurrency and draft shape, ERP-419 decision freeze, ERP-491 master references.",
+  "depends_on": [
+    "ERP-417",
+    "ERP-419",
+    "ERP-491"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-528",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T07:13:01.509504Z"
+}

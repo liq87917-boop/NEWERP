@@ -1,0 +1,67 @@
+{
+  "title": "Persist export tax-refund ledger money and exchange rate at their declared precision and reject unstorable values",
+  "description": "Stage 3 finance-ledger guard for the export tax refund register. db_owner.BaseTaxRefunds is created by the existing authoritative script with ExportAmount DECIMAL(18,4), ExchangeRate DECIMAL(18,6), RefundRate DECIMAL(18,4), RefundableAmount DECIMAL(18,4) and RefundedAmount DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:326-354, ExportAmount :338, ExchangeRate :340, RefundRate :341, RefundableAmount :342, RefundedAmount :343), but the EF model declares no precision for BaseTaxRefund (ErpDbContext.Config.cs has no Entity<BaseTaxRefund> precision entry) so those columns are mapped to decimal(18,2) and four-decimal amounts or rates are silently rounded, while a value large enough to exceed the real column overflows the write after the ledger operation has been prepared. src/ERP.Application/Services/TaxRefundLedgerRules.cs:276-326 validates only non-negativity of the three amounts, the 0..100 refund rate, refunded not exceeding refundable, currency and period text bounds and declare/refund date consistency, and never validates ExchangeRate at all nor whether any stored scalar can be represented verbatim, so a zero, negative, grossly over-precise or overflowing exchange rate and an unstorable amount are all accepted and then rounded or failed at the database. Align the model mapping with the declared columns and validate every scalar before any field is written: amounts and rate representable at four decimals, refund rate kept within 0..100, and exchange rate strictly positive and representable at six decimals, rejecting with the existing controlled InvalidParameter errors and never clamping, rounding or back-filling. Keep every route's live enabled nondeleted identity, account status, existing tax-refund menu and ERP-097 customer scope resolution before any count, read or write, keep historical rows with a null CustomerId readable only to privileged accounts, keep denied writes persisting no ledger row, and keep the read-only tax refund summary report semantics untouched. Add no permission, menu, table, column, index or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Create and update validate ExportAmount, RefundRate, RefundableAmount and RefundedAmount against the declared four-decimal persisted precision and ExchangeRate against the declared six-decimal column, requiring a strictly positive exchange rate and verbatim storability of every scalar, in addition to the existing non-negative amount, 0..100 refund rate, refunded-not-exceeding-refundable, currency and period bounds and declare/refund date consistency rules, returning the existing controlled validation errors without clamping, rounding or back-filling and with no field changed on rejection.",
+    "All existing ledger authority is unchanged: live enabled nondeleted identity, account status, the existing tax-refund functional menu and the authoritative ERP-097 customer scope are resolved before any count, read or write; out-of-scope and unowned rows are not disclosed; historical rows with a null CustomerId stay readable only to privileged accounts; denied calls persist no ledger row; and no new permission, menu, table, column, index or report semantic is introduced.",
+    "Unit boundary, round-trip and rejection cases plus a genuine isolated SQL round-trip cover the exact four-decimal and six-decimal maxima, half-up rounding that lands exactly on the limit, fifth-decimal and seventh-decimal rejection, zero and negative exchange rates, magnitude overflow, unchanged ledger rows on rejection and the existing tax-refund authorization regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/TaxRefundLedgerRules.cs",
+    "src/ERP.Api/Controllers/TaxRefundController.cs",
+    "src/ERP.UnitTests/TaxRefundLedgerTests.cs",
+    "src/ERP.UnitTests/TaxRefundLedgerPersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/TaxRefundLedgerAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/TaxRefundLedgerPersistedNumericBoundsSqlServerTests.cs",
+    "docs/export-tax-refund-ledger-persisted-bounds.md"
+  ],
+  "criterion_path_map": {
+    "Create and update validate ExportAmount, RefundRate, RefundableAmount and RefundedAmount against the declared four-decimal persisted precision and ExchangeRate against the declared six-decimal column, requiring a strictly positive exchange rate and verbatim storability of every scalar, in addition to the existing non-negative amount, 0..100 refund rate, refunded-not-exceeding-refundable, currency and period bounds and declare/refund date consistency rules, returning the existing controlled validation errors without clamping, rounding or back-filling and with no field changed on rejection.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/TaxRefundLedgerRules.cs",
+      "src/ERP.Api/Controllers/TaxRefundController.cs",
+      "docs/export-tax-refund-ledger-persisted-bounds.md"
+    ],
+    "All existing ledger authority is unchanged: live enabled nondeleted identity, account status, the existing tax-refund functional menu and the authoritative ERP-097 customer scope are resolved before any count, read or write; out-of-scope and unowned rows are not disclosed; historical rows with a null CustomerId stay readable only to privileged accounts; denied calls persist no ledger row; and no new permission, menu, table, column, index or report semantic is introduced.": [
+      "src/ERP.Application/Services/TaxRefundLedgerRules.cs",
+      "src/ERP.Api/Controllers/TaxRefundController.cs",
+      "src/ERP.UnitTests/TaxRefundLedgerTests.cs",
+      "src/ERP.IntegrationTests/TaxRefundLedgerAuthorizationSqlServerTests.cs",
+      "docs/export-tax-refund-ledger-persisted-bounds.md"
+    ],
+    "Unit boundary, round-trip and rejection cases plus a genuine isolated SQL round-trip cover the exact four-decimal and six-decimal maxima, half-up rounding that lands exactly on the limit, fifth-decimal and seventh-decimal rejection, zero and negative exchange rates, magnitude overflow, unchanged ledger rows on rejection and the existing tax-refund authorization regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/TaxRefundLedgerPersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/TaxRefundLedgerTests.cs",
+      "src/ERP.IntegrationTests/TaxRefundLedgerAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/TaxRefundLedgerPersistedNumericBoundsSqlServerTests.cs",
+      "docs/export-tax-refund-ledger-persisted-bounds.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Application/Services/TaxRefundLedgerRules.cs:276-326 Validate checks only non-negativity of ExportAmount/RefundableAmount/RefundedAmount (:280-287), RefundRate within 0..100 (:289-290), RefundedAmount not exceeding RefundableAmount (:292-294), Currency and RefundPeriod bounds (:296-308) and date plausibility/order (:310-325); it never reads BaseTaxRefund.ExchangeRate and never applies any persisted-precision or representability check, so no scalar is bounded before persistence; src/ERP.Api/Controllers/TaxRefundController.cs:71-97 is the only create/update gate and calls that Validate after authorization; src/ERP.Domain/Entities/BaseTaxRefund.cs:44,51,54,57,60 declare the five decimals with no precision attribute; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:326-354 declares them DECIMAL(18,4) except ExchangeRate DECIMAL(18,6) (:340); src/ERP.Infrastructure/Data/ErpDbContext.Config.cs declares no precision for BaseTaxRefund, so EF maps them to decimal(18,2) and silently rounds four and six decimal values; the established scalar-storage rule src/ERP.Application/Services/FinancePersistedAmountRules.cs:24-120 (ERP-508, extended by ERP-517) is the reusable guard, and ERP-442 covered only authorization, scope and the non-negative/range checks, so no existing task bounds this ledger's storage precision.",
+  "depends_on": [
+    "ERP-442",
+    "ERP-508",
+    "ERP-517"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-529",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T07:13:01.511459Z"
+}

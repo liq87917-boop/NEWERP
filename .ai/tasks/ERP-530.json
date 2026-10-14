@@ -1,0 +1,65 @@
+{
+  "title": "Store product master prices, sizes, weights, refund rate and stock thresholds at their declared four-decimal precision",
+  "description": "Stage 3 master-data guard for the product records that quotation, PI, order, stock, loading and report flows all resolve. src/ERP.Application/Services/ProductAuthorizationRules.cs documents and enforces a persisted maximum of DECIMAL(18,4) (MaxDecimalMagnitude at :86-91, applied at :217-232 through the magnitude-only implementation at :257-263), and docs/product-master-authority.md repeats that prices, sizes, weights, volumes, refund rate and stock thresholds are four-decimal columns, but the EF model declares no precision for BaseProduct (ErpDbContext.Config.cs has only the product-code unique index at :34 and no Entity<BaseProduct> precision entry) so EF maps PurchasePrice, SalePrice, CostPrice, Weight, Volume, Length, Width, Height, OuterLength, OuterWidth, OuterHeight, OuterWeight, VolumeWeight, RefundRate, MinStock and MaxStock to decimal(18,2); three and four decimal values such as a volume of 0.0125 or a refund rate of 13.0555 therefore pass validation and are silently rounded on the way to SQL, contradicting the declared four-decimal storage and losing shipping and tax evidence. The columns the repository itself creates are declared DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:310-316 for OuterLength/OuterWidth/OuterHeight/OuterWeight/VolumeWeight/RefundRate and :552-553 for MinStock/MaxStock), so align the EF mapping with the declared storage, exactly as was already done for BaseProductSupplier.MinOrderQty at ErpDbContext.Config.cs:90, and make the write guard reject rather than round any decimal that cannot be stored verbatim at four decimals, before any BaseProducts row is written. Keep every existing route's live identity, account status and product menu authority independent of request shape and path, the ERP-097 read scope, required and optional text length bounds, the non-negative UnitsPerPackage and MinOrderQty integer shapes, the known 1/0 status, the unique product code, the variant and sourcing read annotations, the export field completeness rules and the guarded image upload behaviour unchanged; a denied write persists no BaseProducts row. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Product create and update validate every persisted decimal column (PurchasePrice, SalePrice, CostPrice, Weight, Volume, Length, Width, Height, OuterLength, OuterWidth, OuterHeight, OuterWeight, VolumeWeight, RefundRate, MinStock and MaxStock) against the declared four-decimal persisted mapping, rejecting any value that exceeds the magnitude limit or that carries more than four decimal places with the existing controlled validation error instead of silently rounding it, while every value within the declaration round-trips verbatim through the EF mapping.",
+    "Existing product authority and semantics remain intact: live enabled nondeleted identity, account status and the existing product menu on every route, including export and image upload routes, independently of request path and shape; the ERP-097 read scope; required and optional text length bounds; non-negative UnitsPerPackage and MinOrderQty; known 1/0 status; the unique product code; variant and sourcing read annotations; export field completeness and image upload rules; denied writes persist no BaseProducts row and no permission, menu, column or index is added.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, preservation of the currently accepted boundary values and unchanged rows on rejection, together with the existing product master authorization and forwarder regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/ProductMasterPersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/ProductMasterAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ProductMasterPersistedNumericBoundsSqlServerTests.cs",
+    "docs/product-master-persisted-numeric-bounds.md"
+  ],
+  "criterion_path_map": {
+    "Product create and update validate every persisted decimal column (PurchasePrice, SalePrice, CostPrice, Weight, Volume, Length, Width, Height, OuterLength, OuterWidth, OuterHeight, OuterWeight, VolumeWeight, RefundRate, MinStock and MaxStock) against the declared four-decimal persisted mapping, rejecting any value that exceeds the magnitude limit or that carries more than four decimal places with the existing controlled validation error instead of silently rounding it, while every value within the declaration round-trips verbatim through the EF mapping.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "docs/product-master-persisted-numeric-bounds.md"
+    ],
+    "Existing product authority and semantics remain intact: live enabled nondeleted identity, account status and the existing product menu on every route, including export and image upload routes, independently of request path and shape; the ERP-097 read scope; required and optional text length bounds; non-negative UnitsPerPackage and MinOrderQty; known 1/0 status; the unique product code; variant and sourcing read annotations; export field completeness and image upload rules; denied writes persist no BaseProducts row and no permission, menu, column or index is added.": [
+      "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+      "docs/product-master-persisted-numeric-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, preservation of the currently accepted boundary values and unchanged rows on rejection, together with the existing product master authorization and forwarder regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/ProductMasterPersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ProductMasterAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ProductMasterPersistedNumericBoundsSqlServerTests.cs",
+      "docs/product-master-persisted-numeric-bounds.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Application/Services/ProductAuthorizationRules.cs:86-91 declares MaxDecimalMagnitude 99999999999999.9999 with the comment that the whole decimal set is DECIMAL(18,4), :217-232 calls EnsurePersistedDecimal for all sixteen decimal columns and :257-263 implements it as a magnitude comparison only, so a value with five or more decimals passes and is later rounded; docs/product-master-authority.md:51 repeats the DECIMAL(18,4) claim; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:34 declares only the product code unique index for BaseProduct and contains no Entity<BaseProduct> precision entry, so EF maps those columns to decimal(18,2); the repository's own DDL declares DECIMAL(18,4) at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:310-316 (OuterLength, OuterWidth, OuterHeight, OuterWeight, VolumeWeight, RefundRate) and :552-553 (MinStock, MaxStock); src/ERP.Domain/Entities/BaseOtherInfo.cs:45-66,97-109,116,141-144 declares the decimals without precision attributes; src/ERP.Api/Controllers/BaseDataControllers.cs:601 declares ProductController and :675-688 calls ProductAuthorizationRules.Validate on create and update; src/ERP.UnitTests/ProductMasterAuthorizationTests.cs:422,449-455 asserts only the magnitude boundary, so no existing task covers scale; the precedent fix is ErpDbContext.Config.cs:90 with src/ERP.UnitTests/ProductSupplierTests.cs:1167-1170.",
+  "depends_on": [
+    "ERP-452",
+    "ERP-467"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-530",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T07:13:01.513412Z"
+}

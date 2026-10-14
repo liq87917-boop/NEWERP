@@ -1,0 +1,74 @@
+{
+  "title": "Store supplier tax and rebate rates and customer credit and commission ratios at their declared four-decimal precision",
+  "description": "Stage 3 master-data guard for the supplier and customer rates that purchase orders, sales orders, quotations, PI, exposure, aging and commission reports all resolve. The repository's own upgrade script declares BaseCustomers.CommissionRatio DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:289) and BaseSuppliers.TaxRate and RebateRatio DECIMAL(18,4) (:301 and :303), and both guards document a DECIMAL(18,4) bound (src/ERP.Application/Services/SupplierAuthorizationRules.cs:98 MaxRateMagnitude, :188, applied at :219-220 through :243-248; src/ERP.Application/Services/CustomerAuthorizationRules.cs:103-108, :198, applied at :237-239 through :265-269), but the EF model declares no precision for BaseSupplier or BaseCustomer (ErpDbContext.Config.cs:29-30,43 contain only the code unique indexes and the forwarder length, with no precision entry), so EF maps TaxRate, RebateRatio, CreditLimit, DepositRatio and CommissionRatio to decimal(18,2) and three or four decimal rates such as a rebate of 1.2345 or a commission ratio of 0.1250 pass validation and are silently rounded to two decimals on write, changing the ratio that downstream deposit, commission and reconciliation evidence is derived from. Align the EF mapping with the declared four-decimal columns and make both write guards reject, never round, any rate or credit value that cannot be stored verbatim at four decimals, before any BaseSuppliers or BaseCustomers row is written. Keep every route's live identity, account status and menu authority on both masters, the ERP-097 customer read scope, code and name and text bounds, the known 1/0 status, the unique supplier and customer codes and the customer forwarder reference semantics unchanged; a denied write persists no row. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Supplier and customer create and update validate TaxRate, RebateRatio, CreditLimit, DepositRatio and CommissionRatio against the declared four-decimal persisted mapping and reject any value that exceeds the magnitude limit or carries more than four decimal places with the existing controlled validation error instead of silently rounding it, while every value within the declaration round-trips verbatim after save.",
+    "Existing master-data authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing supplier or customer menu resolved before every read and write, the ERP-097 customer read scope, code, name and optional text length bounds, the known 1/0 status, the unique supplier and customer codes and the customer forwarder reference semantics; denied writes persist no BaseSuppliers or BaseCustomers row, and no permission, menu, column or index is added.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, unchanged rows on rejection and the existing supplier and customer master authorization and forwarder regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+    "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/MasterDataRatePersistedBoundsTests.cs",
+    "src/ERP.IntegrationTests/SupplierMasterAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/CustomerMasterAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/MasterDataRatePersistedBoundsSqlServerTests.cs",
+    "docs/master-data-rate-persisted-bounds.md"
+  ],
+  "criterion_path_map": {
+    "Supplier and customer create and update validate TaxRate, RebateRatio, CreditLimit, DepositRatio and CommissionRatio against the declared four-decimal persisted mapping and reject any value that exceeds the magnitude limit or carries more than four decimal places with the existing controlled validation error instead of silently rounding it, while every value within the declaration round-trips verbatim after save.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "docs/master-data-rate-persisted-bounds.md"
+    ],
+    "Existing master-data authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing supplier or customer menu resolved before every read and write, the ERP-097 customer read scope, code, name and optional text length bounds, the known 1/0 status, the unique supplier and customer codes and the customer forwarder reference semantics; denied writes persist no BaseSuppliers or BaseCustomers row, and no permission, menu, column or index is added.": [
+      "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+      "docs/master-data-rate-persisted-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, unchanged rows on rejection and the existing supplier and customer master authorization and forwarder regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/MasterDataRatePersistedBoundsTests.cs",
+      "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SupplierMasterAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/CustomerMasterAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/MasterDataRatePersistedBoundsSqlServerTests.cs",
+      "docs/master-data-rate-persisted-bounds.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Application/Services/SupplierAuthorizationRules.cs:98 declares MaxRateMagnitude 99999999999999.9999, :188 documents the DECIMAL(18,4) bound, :219-220 validates TaxRate and RebateRatio and :243-248 implements only a magnitude comparison, so five-plus decimal values pass and are rounded; src/ERP.Application/Services/CustomerAuthorizationRules.cs:103-108 and :198 declare and document the same DECIMAL(18,4) bound, :237-239 validate CreditLimit, DepositRatio and CommissionRatio and :265-269 implements only the magnitude comparison; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:29-30,43 configure only the code unique indexes and the forwarder length for BaseCustomer and BaseSupplier and contain no precision entry, so EF maps those columns to decimal(18,2) and rounds three and four decimal rates; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:289 declares BaseCustomers.CommissionRatio DECIMAL(18,4) and :301,:303 declare BaseSuppliers.TaxRate and RebateRatio DECIMAL(18,4); src/ERP.Api/Controllers/BaseDataControllers.cs:36,121-138 (CustomerController create/update with CustomerAuthorizationRules.Validate) and :180,239-252 (SupplierController create/update with SupplierAuthorizationRules.Validate) are the only write gates; src/ERP.UnitTests/ProductSupplierTests.cs:1167-1170 and ErpDbContext.Config.cs:90 show the precedent of declaring four-decimal precision explicitly; ERP-447 and ERP-451 added the authority and magnitude bounds only, so no existing task covers rate scale.",
+  "depends_on": [
+    "ERP-447",
+    "ERP-451",
+    "ERP-467"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-531",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T07:13:01.514387Z"
+}
