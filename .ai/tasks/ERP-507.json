@@ -1,0 +1,77 @@
+{
+  "title": "Bound stock-count quantities and calculated signed differences before persistence",
+  "description": "StockAdjustmentPostingRules.EnsureLineShape only checks nonnegative BookQuantity/ActualQuantity/UnitCost and duplicate ProductId. StockAdjustmentController.Create reserves a number before those checks; Normalize computes unbounded signed differences, multiplication and totals. Close actual decimal(18,4) quantity/amount and decimal(18,6) cost storage overflow/precision gaps through existing posting rules and controller. Validate every row actually persisted and normalized, including submitted IsDeleted flags: current ResetDetailIds only resets Id and Normalize loops every row, while EnsureLineShape filters deleted rows. Establish coherent existing server-owned child semantics without silently discarding an invalid persisted row. Validate before numbering or tracked header/detail mutation. Preserve zero book/actual counts, zero cost, signed differences, original duplicate-product prohibition and supported header-only drafts; operational commitment still follows existing valid-line requirements. Preserve stock baseline and valuation rules; do not broaden inventory permissions. Preserve existing authority, supported currencies and rounding, source eligibility/capacity, deterministic locks and all original assertions. Adapt original fixtures with genuine live identities/grants and masters only. Historical reads/cancel/void/reversal must retain existing undo semantics, without a new draft-validity gate. No schema/migration, automatic master changes or new grants. Explicit test output/TRX/results under .ai/logs/<task> only; retain complete original failure logs. Validate EF SQL metadata in a fresh isolated test database; no production configuration or deployment. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+    "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+    "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+    "src/ERP.UnitTests/InventoryMovementTests.cs",
+    "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+    "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+    "docs/stock-adjustment-numeric-bounds.md"
+  ],
+  "acceptance_criteria": [
+    "Draft create/update rejects unrepresentable book/actual quantity or unit cost and invalid computed signed line/header differences with controlled business errors before numbering or persistence. No CLR overflow or SQL truncation/overflow escapes; precision policy follows actual EF storage and existing InventoryService rounding.",
+    "Every persisted row is covered even when a client marks it deleted; live warehouse/product and original duplicate checks remain. Submit/approve revalidate current effective stored values inside existing locks and verified book baseline. Preserve signed gain/loss and zero counts/cost; rejection leaves quantities, ledger, status, details and sequence unchanged.",
+    "Meaningful rules/controller and fresh genuine SQL regressions verify actual EF column precision, representable boundaries, fractional precision, product duplicates, signed differences, overflow multiplication/totals, hidden-row flags, valid count/posting and denied zero changes/numbering. Run original adjustment posting/reversal/concurrency tests and safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Draft create/update rejects unrepresentable book/actual quantity or unit cost and invalid computed signed line/header differences with controlled business errors before numbering or persistence. No CLR overflow or SQL truncation/overflow escapes; precision policy follows actual EF storage and existing InventoryService rounding.": [
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+      "docs/stock-adjustment-numeric-bounds.md"
+    ],
+    "Every persisted row is covered even when a client marks it deleted; live warehouse/product and original duplicate checks remain. Submit/approve revalidate current effective stored values inside existing locks and verified book baseline. Preserve signed gain/loss and zero counts/cost; rejection leaves quantities, ledger, status, details and sequence unchanged.": [
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+      "docs/stock-adjustment-numeric-bounds.md"
+    ],
+    "Meaningful rules/controller and fresh genuine SQL regressions verify actual EF column precision, representable boundaries, fractional precision, product duplicates, signed differences, overflow multiplication/totals, hidden-row flags, valid count/posting and denied zero changes/numbering. Run original adjustment posting/reversal/concurrency tests and safe Release/full units.": [
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+      "docs/stock-adjustment-numeric-bounds.md"
+    ]
+  },
+  "implementation_evidence": "StockAdjustmentController.Create:150-160 generates before EnsureLineShape; Normalize:430-446 multiplies and sums unchecked every detail. StockAdjustmentPostingRules.EnsureLineShape:106-128 only sign/id/duplicate checks. ErpDbContext.Config.cs:174-180 explicitly declares signed quantities/amounts18,4 and cost18,6. ERP-355 protects baseline/atomic posting but no numeric representability; ERP-501 repairs sibling transfer only.",
+  "depends_on": [
+    "ERP-506",
+    "ERP-355",
+    "ERP-501"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-507",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T00:49:33.415938Z"
+}
