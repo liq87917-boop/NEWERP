@@ -39,11 +39,36 @@ public static class AgencyFeeEvidenceConcurrencyRules
 {
     /// <summary>锁序口径文案（接口 / 文档同源）。</summary>
     public const string GlobalLockOrderText =
-        "ERP-519 / ERP-520 唯一确定性锁序：① 代理服务费协议证据行（AgencyServiceFeeAgreements，同一 Id）→ "
-        + "② 代理服务费对账单证据行（AgencyServiceFeeStatements，同一 Id，ERP-520）；更下游的收款分摊证据行 / "
-        + "收款单行锁（ERP-521）只允许在对账单证据行锁之后获取。同一事务需要同时锁定多级证据行时，只能按此顺序加锁，"
-        + "绝不反向获取。所有调用方都按此顺序加锁，以求「条件判定 + 写入」原子并把同一协议的草稿修改 / 登记 / 作废竞争、"
-        + "同一对账单的草稿行替换 / 登记冻结 / 作废竞争串行化。";
+        "ERP-519 / ERP-520 / ERP-521 唯一确定性锁序：① 代理服务费协议证据行（AgencyServiceFeeAgreements，同一 Id）→ "
+        + "② 代理服务费对账单证据行（AgencyServiceFeeStatements，同一 Id，ERP-520）→ "
+        + "③ 客户收款单行（FinanceReceipts，同一 Id，ERP-521：共享收款单唯一分摊额度）→ "
+        + "④ 收款分摊证据行（AgencyServiceFeeCollectionAllocations，ERP-521）。"
+        + "更下游的收款分摊证据行 / 收款单行锁（ERP-521）只允许在对账单证据行锁之后获取；"
+        + "同一事务需要同时锁定多级证据行时，只能按此顺序加锁，绝不反向获取。"
+        + "所有调用方都按此顺序加锁，以求「条件判定 + 写入」原子并把同一协议的草稿修改 / 登记 / 作废竞争、"
+        + "同一对账单的草稿行替换 / 登记冻结 / 作废竞争、不同收款单对同一对账单共享未分摊额度的竞争、"
+        + "对账单作废与收款分摊登记 / 作废竞争串行化。";
+
+    /// <summary>
+    /// 收款分摊证据（ERP-521）锁序口径文案（接口 / 文档同源）：登记 / 作废收款分摊行都必须先取同一对账单证据行锁
+    /// （共享对账单未分摊额度，串行化不同收款单对同一对账单的额度竞争与对账单作废），再取同一收款单行锁
+    /// （共享收款单唯一分摊额度），最后才读写收款分摊证据行；所有调用方都按此顺序加锁，绝不反向获取。
+    /// 对账单作废只取对账单行锁、<strong>不</strong>取收款单行锁（只读有效分摊证据计数），因此不引入反向锁序。
+    /// </summary>
+    public const string CollectionAllocationLockOrderText =
+        "ERP-521 分摊证据锁序：登记 / 作废收款分摊行都必须先取同一对账单证据行锁（AgencyServiceFeeStatements，同一 Id，"
+        + "共享对账单未分摊额度，串行化不同收款单对同一对账单的额度竞争与对账单作废），再取同一收款单行锁"
+        + "（FinanceReceipts，同一 Id，共享收款单唯一分摊额度），最后才读写收款分摊证据行"
+        + "（AgencyServiceFeeCollectionAllocations）；所有调用方都按此顺序加锁，绝不反向获取。"
+        + "对账单作废只取对账单行锁、不取收款单行锁（只读有效分摊证据计数），因此不引入反向锁序。";
+
+    /// <summary>
+    /// 对账单存在有效收款分摊证据时禁止作废的受控错误文案尾段（不披露数据库内部细节，绝不泄露 SQL / 索引名）。
+    /// </summary>
+    public const string StatementVoidBlockedByActiveAllocationsText =
+        "不能作废：请先通过既有的收款分摊作废服务显式作废这些有效分摊行"
+        + "（作废保留原始金额、快照与历史，可读），再对该对账单作废；"
+        + "系统绝不静默删除、改派或绕过有效收款分摊证据";
 
     /// <summary>协议行锁的等价 T-SQL 形式（契约 / 文档同源；实际执行走 <see cref="LockAgreementRowAsync"/> 的审计时间戳刷新）。</summary>
     public const string AgreementRowLockSql =
@@ -54,6 +79,13 @@ public static class AgencyFeeEvidenceConcurrencyRules
     /// </summary>
     public const string StatementRowLockSql =
         "SELECT [Id] FROM [db_owner].[AgencyServiceFeeStatements] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {0}";
+
+    /// <summary>
+    /// 收款单行锁的等价 T-SQL 形式（ERP-521；契约 / 文档同源；实际执行走
+    /// <see cref="CustomerReceiptLifecycleRules.LockReceiptRowAsync"/> 的审计时间戳刷新）。
+    /// </summary>
+    public const string ReceiptRowLockSql =
+        "SELECT [Id] FROM [dbo].[FinanceReceipts] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {0}";
 
     /// <summary>边界文案（不新增权限 / 表列 / 索引，不改写既有业务记录与历史证据）。</summary>
     public const string BoundaryText =
@@ -271,6 +303,45 @@ public static class AgencyFeeEvidenceConcurrencyRules
         }
 
         return null;
+    }
+
+    // ==================== 2.1 对账单 ↔ 收款分摊证据互斥（ERP-521） ====================
+
+    /// <summary>
+    /// 统计该对账单指向的**有效**（未删除、未作废）收款分摊证据条数。调用方必须已经持有同一对账单的行锁
+    /// （同一事务内），此时才是权威计数：登记 / 作废分摊行都先取同一把对账单行锁
+    /// （见 <see cref="CollectionAllocationLockOrderText"/>），因此「计数 + 判定 + 写入」严格串行。
+    /// </summary>
+    public static async Task<int> CountActiveCollectionAllocationsAsync(IErpDbContext db, long statementId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (statementId <= 0) return 0;
+        return await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+            .CountAsync(a => !a.IsDeleted
+                             && a.StatementId == statementId
+                             && a.Status == AgencyServiceFeeCollectionAllocationRules.StatusActive);
+    }
+
+    /// <summary>
+    /// 对账单作废前护栏（ERP-521）：只要该对账单仍存在任一**有效**收款分摊证据，就受控拒绝作废，
+    /// 并显式要求先走既有的收款分摊作废服务释放额度（原始金额 / 快照 / 历史全部保留）；
+    /// 绝不静默删除、改派或绕过有效分摊证据。必须在对账单行锁之内、任何状态写入之前调用。
+    /// </summary>
+    public static async Task EnsureNoActiveCollectionAllocationsAsync(
+        IErpDbContext db, long statementId, string identity)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var activeCount = await CountActiveCollectionAllocationsAsync(db, statementId);
+        EnsureNoActiveCollectionAllocations(activeCount, identity);
+    }
+
+    /// <summary>纯判定形式（便于无数据库单测）：有效分摊证据条数大于 0 即受控拒绝，绝不静默改写证据。</summary>
+    public static void EnsureNoActiveCollectionAllocations(int activeCount, string identity)
+    {
+        if (activeCount <= 0) return;
+        throw BusinessException.RuleConflict(
+            $"对账单「{identity}」仍存在 {activeCount} 条有效收款分摊证据，"
+            + StatementVoidBlockedByActiveAllocationsText);
     }
 
     // ==================== 3. 受控写入 ====================

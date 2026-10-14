@@ -25,9 +25,11 @@ namespace ERP.Application.Services;
 /// 联系客户、<strong>不</strong>调用任何外部服务，也<strong>不</strong>改写收款单（含状态 / 金额 / 币种 / 付款方式 /
 /// 银行账户 / 备注）、对账单证据（含合计 / 状态 / 登记人）、ERP-069 协议证据、客户主数据、销售订单、
 /// 装柜与装柜清单、单证、发票、库存与库存成本、库存流水、费用与退税、结算与余额记录。</para>
-/// <para>ERP-383 锁序审计：本服务只取<b>收款单行锁</b>（ERP-383 唯一全局锁序第 3 段：来源销售订单行 → 客户销项发票行 →
-/// 客户收款单行 → 引用 / 分摊 / 证据行），登记 / 显式作废都先取收款单行锁再读写分摊行；本服务<strong>不</strong>获取
-/// 上游销售订单行 / 客户销项发票行锁，因此与 ERP-347 销售订单取消、ERP-383 客户销项发票模块都不构成反向加锁。</para>
+/// <para>ERP-383 / ERP-521 锁序审计：本服务在 ERP-383 唯一全局锁序第 3 段（客户收款单行 → 引用 / 分摊 / 证据行）
+/// 之内，再叠加 ERP-521 的对账单证据行锁——登记 / 显式作废都按<b>固定顺序</b>先取<b>同一对账单证据行锁</b>
+/// （共享对账单未分摊额度，串行化不同收款单对同一对账单的额度竞争与对账单作废），再取<b>同一收款单行锁</b>
+/// （共享收款单唯一分摊额度），最后才读写分摊行；本服务<strong>不</strong>获取上游销售订单行 / 客户销项发票行锁，
+/// 因此与 ERP-347 销售订单取消、ERP-383 客户销项发票模块都不构成反向加锁。</para>
 /// </summary>
 public static class AgencyServiceFeeCollectionAllocationService
 {
@@ -71,6 +73,9 @@ public static class AgencyServiceFeeCollectionAllocationService
     /// <para>校验顺序：对账单可用（未删除 → 不存在；草稿 / 已作废 → 拒绝）→ 收款单可用（未删除 → 不存在；
     /// 已取消 → 拒绝）→ 币种口径 → 客户与币种一致性 → 分摊金额（精度 + 大于 0）→ 备注 →
     /// 两侧有效行数上限 → 重复有效行 → 收款单可分摊余额 → 对账单未分摊额。</para>
+    /// <para>ERP-521 并发：同一原子事务内先取<b>同一对账单证据行锁</b>、再取<b>同一收款单行锁</b>，两把锁都取到
+    /// 之后才重读两侧权威实体与有效分摊合计；因此不同收款单对同一对账单的<b>共享未分摊额度</b>竞争、
+    /// 以及「登记分摊」与「对账单作废」竞争都被串行化——只有唯一赢家，额度与两侧合计守恒，被拒请求零写入。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeCollectionAllocationDto> CreateAsync(
         IErpDbContext db, AgencyServiceFeeCollectionAllocationSaveDto dto, string? allocatedBy)
@@ -87,13 +92,13 @@ public static class AgencyServiceFeeCollectionAllocationService
                 "请显式选择要分摊的客户收款单（收款单 Id 必须由用户显式选择，"
                 + "系统不按单号文本、金额或日期相似度匹配收款单）");
 
-        // 与收款单生命周期（取消 / 修改 / 删除）互斥：先对收款单行加排它行锁，再读权威金额与状态，
-        // 避免「登记分摊证据」与「收款单被取消 / 改金额」并发竞态。
-        await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(db)
-            ? await db.Database.BeginTransactionAsync()
-            : null;
+        // ERP-521 确定性锁序（绝不反向获取）：① 同一对账单证据行锁（共享对账单未分摊额度，串行化不同收款单
+        // 对同一对账单的额度竞争以及对账单作废）→ ② 同一收款单行锁（共享收款单唯一分摊额度，与收款单生命周期
+        // 及两套分摊证据写入互斥）→ ③ 分摊证据行；两把锁都取到之后才重读两侧权威实体与有效分摊合计。
+        await using var transaction = await AgencyFeeEvidenceConcurrencyRules.BeginMutationTransactionAsync(db);
         try
         {
+            await AgencyFeeEvidenceConcurrencyRules.LockStatementRowAsync(db, dto.StatementId);
             await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, dto.ReceiptId);
 
             var statement = await LoadStatementAsync(db, dto.StatementId);
@@ -198,14 +203,14 @@ public static class AgencyServiceFeeCollectionAllocationService
             db.AgencyServiceFeeCollectionAllocations.Add(allocation);
             await db.SaveChangesAsync();
 
-            if (transaction is not null) await transaction.CommitAsync();
+            await AgencyFeeEvidenceConcurrencyRules.CommitAsync(transaction);
             return Map(allocation,
                 new Dictionary<long, FinanceReceipt> { [receipt.Id] = receipt },
                 new Dictionary<long, AgencyServiceFeeStatement> { [statement.Id] = statement });
         }
         catch
         {
-            if (transaction is not null) await transaction.RollbackAsync();
+            await AgencyFeeEvidenceConcurrencyRules.TryRollbackAsync(transaction, db);
             throw;
         }
     }
@@ -230,28 +235,31 @@ public static class AgencyServiceFeeCollectionAllocationService
     /// 作废一条收款分摊行（有效 → 已作废）：必须填写作废原因；<strong>保留</strong>原始分摊金额、对账单与
     /// 收款单快照、客户快照、登记人与时间戳，不物理删除、不改派、不改写原始金额，也不产生任何收款 / 记账 /
     /// 核销 / 结算 / 催收动作；作废后该组合可重新登记一条新的有效分摊行（新旧并存可查）；重复作废被拒绝。
-    /// <para>ERP-378：作废在<b>同一事务</b>内先取收款单行锁（<b>先收款单行、后分摊行</b>，与收款单生命周期
-    /// 及两套分摊证据写入同一锁序），再读分摊行做权威作废判定与写入；因此「作废释放额度」与
-    /// 「收款单取消 / 删除 / 改动客户 / 币种 / 金额」严格串行，失败整体回滚、原始证据与审计保持不变。</para>
+    /// <para>ERP-378 / ERP-521：作废在<b>同一事务</b>内按固定锁序先取对账单证据行锁、再取收款单行锁
+    /// （<b>先对账单行、后收款单行、最后分摊行</b>，与分摊登记、对账单作废同一锁序），再读分摊行做权威作废判定与写入；
+    /// 因此「作废释放额度」与「对账单作废」「收款单取消 / 删除 / 改动客户 / 币种 / 金额」严格串行，
+    /// 失败整体回滚、原始证据与审计保持不变。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeCollectionAllocationDto> VoidAsync(
         IErpDbContext db, long allocationId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        // ERP-378 锁序：先做一次轻量投影读取仅为取得收款单 Id（不是权威判定、不构成锁），
-        // 取锁之后才读分摊行做权威作废判定，避免「作废证据」与「收款单取消 / 改金额」并发互相失效。
-        var receiptId = await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+        // ERP-521 确定性锁序（绝不反向获取）：先做一次轻量投影读取仅为取得对账单 / 收款单 Id（不是权威判定、
+        // 不构成锁）；取锁顺序固定为 ① 对账单证据行锁 → ② 收款单行锁，取锁之后才读分摊行做权威作废判定，
+        // 因此「作废分摊证据」与「对账单作废」「收款单取消 / 改金额」都严格串行，失败整体回滚。
+        var target = await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
             .Where(a => a.Id == allocationId)
-            .Select(a => (long?)a.ReceiptId)
+            .Select(a => new { a.StatementId, a.ReceiptId })
             .FirstOrDefaultAsync();
 
-        await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(db)
-            ? await db.Database.BeginTransactionAsync()
-            : null;
+        await using var transaction = await AgencyFeeEvidenceConcurrencyRules.BeginMutationTransactionAsync(db);
         try
         {
-            if (receiptId is > 0) await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, receiptId.Value);
+            if (target is not null && target.StatementId > 0)
+                await AgencyFeeEvidenceConcurrencyRules.LockStatementRowAsync(db, target.StatementId);
+            if (target is not null && target.ReceiptId > 0)
+                await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, target.ReceiptId);
 
             var allocation = await LoadAllocationAsync(db, allocationId);
             var identity = AgencyServiceFeeCollectionAllocationRules.AllocationIdentityText(
@@ -267,12 +275,12 @@ public static class AgencyServiceFeeCollectionAllocationService
 
             await db.SaveChangesAsync();
 
-            if (transaction is not null) await transaction.CommitAsync();
+            await AgencyFeeEvidenceConcurrencyRules.CommitAsync(transaction);
             return await MapOneAsync(db, allocation);
         }
         catch
         {
-            if (transaction is not null) await transaction.RollbackAsync();
+            await AgencyFeeEvidenceConcurrencyRules.TryRollbackAsync(transaction, db);
             throw;
         }
     }

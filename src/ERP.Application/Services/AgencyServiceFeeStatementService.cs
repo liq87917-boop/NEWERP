@@ -25,7 +25,10 @@ namespace ERP.Application.Services;
 /// 锁内的权威表头 / 行、客户 / 协议资格、逐行来源资格才是唯一依据，因此「草稿行替换」与「登记冻结 / 作废」严格串行——
 /// 并发登记 / 作废只有唯一赢家，迟到的草稿替换一律被受控拒绝，冻结的合计与行集合完全一致，
 /// 零部分写入、零审计漂移；登记 / 作废冻结前会按登记口径重做一次权威校验（客户启用 / 协议已登记且客户币种一致 /
-/// 逐行来源仍可引用），任一行失效即整体回滚，历史证据与作废留痕不删除、不回填。</item>
+/// 逐行来源仍可引用），任一行失效即整体回滚，历史证据与作废留痕不删除、不回填。
+/// <strong>ERP-521</strong>：作废在同一把对账单行锁内先判定「该对账单不存在任何有效收款分摊证据」
+/// （分摊登记 / 作废也先取同一把锁），因此「对账单作废」与「收款分摊登记 / 作废」严格串行——绝不出现
+/// 「已作废对账单仍被有效分摊证据指向」或「释放额度与作废交错」的部分状态；要作废必须先显式作废分摊证据。</item>
 /// </list>
 /// <para>来源链接口径（关键）：行只按「来源类型 + 来源记录 Id」的**持久化标识符**引用来源，
 /// 本服务<strong>不</strong>按单号文本、金额、日期或相似度匹配 / 猜测任何来源。</para>
@@ -543,7 +546,8 @@ public static class AgencyServiceFeeStatementService
     /// <summary>
     /// 路由级作废对账单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
     /// 越范围 / 已删除 / 不存在一律同一条不披露错误，拒绝发生在**改写状态之前**——原始行、来源快照与审计不变。
-    /// <para>ERP-520：范围预检之后，作废仍在同一事务 + 同一对账单行锁内把范围重新施加到**权威行**；
+    /// <para>ERP-520 / ERP-521：范围预检之后，作废仍在同一事务 + 同一对账单行锁内把范围重新施加到**权威行**；
+    /// 同一把锁内还判定「该对账单不存在任何有效收款分摊证据」（否则受控拒绝并要求先作废分摊证据），
     /// 表头与全部行的作废状态 / 原因 / 时间戳在**同一提交**内落库（要么全冻结作废，要么逐字段不变）。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeStatementDto> VoidAsync(
@@ -565,9 +569,11 @@ public static class AgencyServiceFeeStatementService
         => await VoidCoreAsync(db, statementId, reason, scope: null);
 
     /// <summary>
-    /// 作废核心（ERP-520）：同一事务 + 同一对账单行锁 → 锁内重读权威状态后判定可作废性 → 写入作废状态 /
-    /// 原因 / 时间戳与全部行。并发「登记 vs 作废」只有唯一赢家：输家在锁内读到最新权威状态一律受控拒绝，
-    /// 绝不覆盖赢家已冻结 / 已作废的字段与时间戳；被拒请求整体回滚（零部分写入、零审计漂移）。
+    /// 作废核心（ERP-520 / ERP-521）：同一事务 + 同一对账单行锁 → 锁内重读权威状态后判定可作废性 →
+    /// 再判定「不存在任何有效收款分摊证据」→ 写入作废状态 / 原因 / 时间戳与全部行。并发「登记 vs 作废」
+    /// 只有唯一赢家：输家在锁内读到最新权威状态一律受控拒绝，绝不覆盖赢家已冻结 / 已作废的字段与时间戳；
+    /// 分摊登记 / 作废与对账单作废共用同一把对账单行锁，因此不存在「已作废对账单仍被有效分摊证据指向」
+    /// 或「释放额度与作废交错」的部分状态；被拒请求整体回滚（零部分写入、零审计漂移）。
     /// </summary>
     private static async Task<AgencyServiceFeeStatementDto> VoidCoreAsync(
         IErpDbContext db, long statementId, string? reason, SalespersonDataScope? scope)
@@ -583,6 +589,12 @@ public static class AgencyServiceFeeStatementService
             statement = await LockStatementAuthoritativeAsync(db, statementId);
             AgencyServiceFeeStatementRules.EnsureVoidable(statement.Status, IdentityOf(statement));
             EnsureAuthoritativeScope(scope, statement);
+            // ERP-521：同一把对账单行锁之内，只要仍存在任一**有效**收款分摊证据就受控拒绝作废
+            // （必须先走既有收款分摊作废服务显式释放额度）；拒绝发生在任何状态 / 明细 / 审计写入之前。
+            // 分摊登记 / 作废都先取同一把对账单行锁，因此本计数与「登记分摊」严格串行，绝不出现
+            // 「对账单已作废而仍存在指向它的有效分摊证据」。
+            await AgencyFeeEvidenceConcurrencyRules.EnsureNoActiveCollectionAllocationsAsync(
+                db, statement.Id, IdentityOf(statement));
             var reasonText = AgencyServiceFeeStatementRules.NormalizeVoidReason(reason);
 
             var lines = await db.AgencyServiceFeeStatementLines
