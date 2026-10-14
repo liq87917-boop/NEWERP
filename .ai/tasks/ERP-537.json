@@ -64,8 +64,8 @@
   },
   "requires_human_approval": false,
   "id": "ERP-537",
-  "status": "pending",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 1,
   "max_attempts": 3,
   "auto_start": true,
   "human_gate": {

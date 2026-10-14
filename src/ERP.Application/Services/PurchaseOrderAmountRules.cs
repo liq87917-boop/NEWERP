@@ -10,12 +10,15 @@ namespace ERP.Application.Services;
 /// <list type="number">
 /// <item>明细金额：<c>金额 = 数量 × 单价</c>（逐行，服务端重算，不信任客户端金额）；</item>
 /// <item>订单总额：<c>总额 = Σ 明细数量 × 单价</c>；</item>
-/// <item>业务校验：税率必须在 0~100 之间（历史单据不填时为 0，不受影响）。</item>
+/// <item>业务校验：税率必须在 0~100 之间且最多 4 位小数（<c>db_owner.PurchaseOrders.TaxRate</c> 声明为
+/// <c>DECIMAL(18,4)</c>，与声明列同源，ERP-537：无法原样存储的税率一律拒绝，绝不静默取整；
+/// 历史单据不填时为 0，不受影响）。</item>
 /// </list>
 /// <para>边界：本类只做**纯计算与校验**，不访问数据库、不写库、不改变单据状态，也不涉及库存 /
 /// 入库 / 财务口径。金额保留原始精度（不按币种取整），与采购订单既有页面录入路径完全一致。</para>
 /// <para>ERP-426 新增<b>新写入校验</b>（<see cref="ValidateNewWrite"/>）：新增 / 修改 / 提交 / 审核前对
-/// 「有效明细非空、数量为正、单价非负、币种受支持、汇率大于 0、税率 0~100、逐行金额与总额在 EF 实际精度内
+/// 「有效明细非空、数量为正、单价非负、币种受支持、汇率大于 0、税率 0~100 且最多 4 位小数（声明列
+/// <c>DECIMAL(18,4)</c>，ERP-537）、逐行金额与总额在 EF 实际精度内
 /// 可表示」做一次权威校验，任一项不满足即返回受控业务错误（绝不静默取整、绝不把正数量舍入为 0、
 /// 绝不写入与明细合计不一致的金额）。历史读取 / 打印路径不调用本校验，也不会被本类**改写**任何已持久化值。</para>
 /// </summary>
@@ -28,15 +31,32 @@ public static class PurchaseOrderAmountRules
     public const decimal MaxTaxRate = 100m;
 
     /// <summary>
-    /// EF / 数据库实际精度：<c>DECIMAL(18,2)</c>。
-    /// <para>采购订单主表与明细（<c>PurchaseOrders</c> / <c>PurchaseOrderDetails</c>）在 EF 模型中**未**显式
-    /// <c>HasPrecision</c>，因此数量 / 单价 / 行金额 / 合计 / 汇率 / 税率一律按 EF 默认的
-    /// <c>DECIMAL(18,2)</c> 落库。校验必须使用**同一份**精度口径，否则正数量会被舍入为 0、或写入与明细
-    /// 合计不一致的金额。</para>
+    /// 税率列（<c>db_owner.PurchaseOrders.TaxRate</c>）的实际小数位：<c>DECIMAL(18,4)</c>
+    /// （EF 模型已显式 <c>HasPrecision(18, 4)</c>，与 SchemaUpgrader 第 22 段声明同源，ERP-537）。
+    /// <para>这是<b>唯一</b>按四位小数存储的采购订单小数列；其余数量 / 单价 / 行金额 / 合计 / 汇率列仍按
+    /// <see cref="DecimalScale"/>（<c>DECIMAL(18,2)</c>）映射，口径不变。</para>
+    /// </summary>
+    public const int TaxRateScale = 4;
+
+    /// <summary>
+    /// 税率无法在四小数位列内**逐位原样**存储（第 5 位小数或量级溢出）时的拒绝文案
+    /// （既有受控参数错误 <see cref="ErrorCodes.InvalidParameter"/>，绝不静默取整）。
+    /// </summary>
+    public const string TaxRateScaleText =
+        "税率必须在 0~100 之间且最多 4 位小数（DECIMAL(18,4)）：无法原样存储的税率一律拒绝，绝不静默取整";
+
+    /// <summary>
+    /// 采购订单**其余**小数列（数量 / 单价 / 行金额 / 合计 / 汇率）的实际精度：<c>DECIMAL(18,2)</c>。
+    /// <para>这些列在 EF 模型中**未**显式 <c>HasPrecision</c>，因此按 EF 默认的 <c>DECIMAL(18,2)</c> 落库
+    /// （唯一例外是税率列 <c>db_owner.PurchaseOrders.TaxRate</c>，见 <see cref="TaxRateScale"/>，ERP-537）。
+    /// 校验必须使用**同一份**精度口径，否则正数量会被舍入为 0、或写入与明细合计不一致的金额。</para>
     /// </summary>
     public const int DecimalPrecision = 18;
 
-    /// <summary>EF / 数据库实际小数位：2（与 <see cref="DecimalPrecision"/> 同源）。</summary>
+    /// <summary>
+    /// 采购订单其余小数列的实际小数位：2（与 <see cref="DecimalPrecision"/> 同源）；
+    /// 税率列的小数位见 <see cref="TaxRateScale"/>（<c>DECIMAL(18,4)</c>）。
+    /// </summary>
     public const int DecimalScale = 2;
 
     /// <summary><c>DECIMAL(18,2)</c> 的最大可表示值（16 位整数 + 2 位小数）。</summary>
@@ -76,6 +96,33 @@ public static class PurchaseOrderAmountRules
         }
     }
 
+    /// <summary>
+    /// 税率能否在 <c>db_owner.PurchaseOrders.TaxRate</c>（<c>DECIMAL(18,4)</c>）列内 <b>逐位原样</b>存储
+    /// （ERP-537）：落在既有 0~100 政策区间（含端点）且**不超过 4 位小数**。
+    /// <para>纯判定：绝不取整 / 截断 / 夹取入参。<c>0</c> / <c>100</c> / <c>0.1250</c> / <c>13.0555</c> 放行；
+    /// <c>0.12505</c>（第 5 位小数）、<c>99.99995</c>（半进位取整后恰好落到上限）、量级溢出与
+    /// <c>101</c> / <c>-1</c>（超出 0~100 政策）一律 <c>false</c>。</para>
+    /// </summary>
+    public static bool IsTaxRateRepresentable(decimal value)
+        => value >= MinTaxRate && value <= MaxTaxRate
+           && decimal.Round(value, TaxRateScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 税率校验（采购订单**唯一权威**口径，ERP-537）：既要落在既有 0~100 政策区间（含端点），
+    /// 又要能在声明为 <c>DECIMAL(18,4)</c> 的列内逐位原样存储；任一项不满足即返回既有受控业务错误
+    /// （<see cref="ErrorCodes.InvalidParameter"/>），**绝不**把 <c>13.05555</c> 静默取整为 <c>13.06</c> 落库。
+    /// <para>本方法只校验，不改写任何字段，也不访问数据库。</para>
+    /// </summary>
+    public static void ValidateTaxRate(decimal taxRate)
+    {
+        if (taxRate < MinTaxRate || taxRate > MaxTaxRate)
+            throw BusinessException.InvalidParameter(
+                $"税率必须在 {MinTaxRate:0}~{MaxTaxRate:0} 之间");
+
+        if (!IsTaxRateRepresentable(taxRate))
+            throw BusinessException.InvalidParameter(TaxRateScaleText);
+    }
+
     /// <summary>明细金额口径：逐行 <c>金额 = 数量 × 单价</c>（服务端重算，忽略客户端传入的金额）</summary>
     public static void ApplyDetailAmounts(PurchaseOrder order)
     {
@@ -93,14 +140,16 @@ public static class PurchaseOrderAmountRules
         order.TotalAmount = order.Details.Sum(d => d.Quantity * d.UnitPrice);
     }
 
-    /// <summary>业务字段校验（税率 0~100；历史单据不填时为 0，不受影响）</summary>
+    /// <summary>
+    /// 业务字段校验（税率 0~100 且最多 4 位小数；历史单据不填时为 0，不受影响）。
+    /// <para>ERP-537：税率列声明为 <c>DECIMAL(18,4)</c>，无法逐位原样存储的税率（第 5 位小数 /
+    /// 量级溢出）在此受控拒绝，**绝不**静默取整；本方法只校验，不改写任何字段。</para>
+    /// </summary>
     public static void Validate(PurchaseOrder order)
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.TaxRate < MinTaxRate || order.TaxRate > MaxTaxRate)
-            throw BusinessException.InvalidParameter(
-                $"税率必须在 {MinTaxRate:0}~{MaxTaxRate:0} 之间");
+        ValidateTaxRate(order.TaxRate);
     }
 
     /// <summary>有效明细（未软删除）集合；<c>null</c> 明细集合按空集合处理（与「必须至少一行」同口径）。</summary>
@@ -121,7 +170,8 @@ public static class PurchaseOrderAmountRules
     /// <item>逐行单价 ≥ 0 且可在实际 EF 精度内表示（保留既有「零单价」政策）；</item>
     /// <item>币种是 <see cref="Currency"/> 已定义值（不跨币种合计）；</item>
     /// <item>汇率 &gt; 0 且可在实际 EF 精度内表示；</item>
-    /// <item>税率在 0~100（含端点）；</item>
+    /// <item>税率在 0~100（含端点），且不得超过 4 位小数
+    /// （<c>db_owner.PurchaseOrders.TaxRate</c> 声明为 <c>DECIMAL(18,4)</c>，ERP-537）；</item>
     /// <item>逐行「数量 × 单价」与总额均可在实际 EF 精度内表示，且全程 checked：
     /// 溢出 / 不可表示一律返回受控业务错误（<see cref="ErrorCodes.InvalidParameter"/>），
     /// 绝不静默取整、绝不写入与明细合计不一致的金额。</item>

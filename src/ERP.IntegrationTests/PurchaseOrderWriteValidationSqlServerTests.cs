@@ -124,6 +124,29 @@ public sealed class PurchaseOrderWriteValidationSqlServerTests
     }
 
     [Fact]
+    public async Task 新增_税率五位小数_拒绝且零写入不消耗单号()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var before = await SnapshotAsync(db);
+
+        var body = NewBody(new PurchaseOrderDetail
+        {
+            ProductId = _fixture.ProductId, ProductName = "P1", Quantity = 1m, UnitPrice = 1m
+        });
+        body.TaxRate = 13.05555m;     // ERP-537：无法在声明列 DECIMAL(18,4) 内逐位原样存储
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            NewController(db, _fixture.PrivilegedUserId).Create(body));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(PurchaseOrderAmountRules.TaxRateScaleText, ex.Message);
+
+        await using var verify = _fixture.CreateDbContext();
+        AssertUnchanged(before, await SnapshotAsync(verify));
+    }
+
+    [Fact]
     public async Task 新增_客户端伪造合计_服务端按明细重算覆盖并精确落库()
     {
         Guard();

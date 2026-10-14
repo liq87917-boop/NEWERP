@@ -303,6 +303,28 @@ public class PurchaseOrderMutationTests
     }
 
     [Fact]
+    public async Task 改单校验失败_税率五位小数_受控拒绝且既有行不变()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = ControllerFor(db);
+        var order = SeedOrder(db, DocumentStatus.Pending, owningSalesOrderId: null);
+
+        // ERP-537：税率无法在声明列 DECIMAL(18,4) 内逐位原样存储 —— 拒绝而非静默取整。
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Update(order.Id, NewOrder(null, new[] { (ProductA, "PCS", 99m, 99m) }, taxRate: 13.05555m)));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(PurchaseOrderAmountRules.TaxRateScaleText, ex.Message);
+
+        var stored = db.PurchaseOrders.AsNoTracking().Include(o => o.Details).Single(o => o.Id == order.Id);
+        Assert.Equal(0m, stored.TaxRate);
+        Assert.Equal(1000m, stored.TotalAmount);
+        var lines = stored.Details.Where(d => !d.IsDeleted).ToList();
+        Assert.Single(lines);
+        Assert.Equal(10m, lines[0].Quantity);
+    }
+
+    [Fact]
     public void 控制器接线_创建与修改进入统一事务与锁协议()
     {
         var controller = ReadSource("src/ERP.Api/Controllers/PurchaseOrderController.cs");

@@ -163,7 +163,9 @@ public static class PurchaseQuoteConversion
     /// <summary>
     /// 固定映射表（比价行 → 采购订单；未列出的字段一律保持采购订单默认值，不臆造业务数据）：
     /// 供应商 ← SupplierId（必填校验）；订单日期 = 今天；币种 ← Currency 文本（无法识别回退 CNY）；
-    /// 汇率 = 1；是否含税 ← TaxIncluded；税率 = 0（比价表无税率列）；
+    /// 汇率 = 1；是否含税 ← TaxIncluded；税率 = 0（比价表无税率列；税务口径保持既有默认，随后的任何写入
+    /// 仍由 <see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/> 按声明列 <c>DECIMAL(18,4)</c>
+    /// 逐位原样复核，ERP-537）；
     /// 付款条件 ← PaymentTerms；交货日期 = 今天 + DeliveryDays（≤0 留空）；
     /// 供应商确认交期 = 交货日期（比价交期本身即供应商承诺）；归属客户 ← CustomerId / CustomerName；
     /// 归属销售订单 ← RefOrderNo 解析出的销售订单（匹配不到留空）；备注 ← 比价备注 + 来源标记；
@@ -422,6 +424,9 @@ public static class PurchaseQuoteConversion
             Currency = head.Currency,
             ExchangeRate = head.ExchangeRate,
             TaxIncluded = head.TaxIncluded,
+            // ERP-537：税率按组内统一口径原样透传；声明列 db_owner.PurchaseOrders.TaxRate 为 DECIMAL(18,4)，
+            // 无法逐位原样存储的税率由后续 PurchaseOrderMutationRules.EnsureValidatedTerms 受控拒绝
+            // （绝不静默取整），此处不臆造 / 不改写税务口径。
             TaxRate = head.TaxRate,
             PaymentTerms = head.PaymentTerms,
             DeliveryDate = deliveryDate,

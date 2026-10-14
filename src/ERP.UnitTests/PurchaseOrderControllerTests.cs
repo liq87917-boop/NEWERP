@@ -115,6 +115,59 @@ public class PurchaseOrderControllerTests
     }
 
     [Fact]
+    public async Task Update_税率四位小数_按声明精度原样落库()
+    {
+        using var db = TestDbFactory.Create();
+        var (po, _) = SeedPurchaseOrder(db, "PO-TR4", DocumentStatus.Pending);
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
+
+        var update = new PurchaseOrder
+        {
+            OrderDate = DateTime.Today,
+            SupplierId = 999999L, Currency = (Currency)1, ExchangeRate = 1m,
+            TaxRate = 0.1250m,
+            Details = new List<PurchaseOrderDetail>
+            {
+                new() { ProductId = 1, Quantity = 100m, UnitPrice = 25m }
+            }
+        };
+
+        Assert.IsType<OkObjectResult>(await ctl.Update(po.Id, update));
+
+        var dbPo = db.PurchaseOrders.Single(o => o.Id == po.Id);
+        Assert.Equal(0.1250m, dbPo.TaxRate);         // ERP-537：四位小数逐位原样保留
+        Assert.Equal(2500m, dbPo.TotalAmount);
+    }
+
+    [Fact]
+    public async Task Update_税率五位小数_受控拒绝且既有行不变()
+    {
+        using var db = TestDbFactory.Create();
+        var (po, _) = SeedPurchaseOrder(db, "PO-TR5", DocumentStatus.Pending);
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
+
+        var update = new PurchaseOrder
+        {
+            OrderDate = DateTime.Today,
+            SupplierId = 999999L, Currency = (Currency)1, ExchangeRate = 1m,
+            TaxRate = 13.05555m,                          // 无法在声明列 DECIMAL(18,4) 内逐位原样存储
+            Details = new List<PurchaseOrderDetail>
+            {
+                new() { ProductId = 1, Quantity = 100m, UnitPrice = 25m }
+            }
+        };
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Update(po.Id, update));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(PurchaseOrderAmountRules.TaxRateScaleText, ex.Message);
+
+        var dbPo = db.PurchaseOrders.Single(o => o.Id == po.Id);
+        Assert.Equal(0m, dbPo.TaxRate);
+        Assert.Equal(1000m, dbPo.TotalAmount);
+    }
+
+    [Fact]
     public async Task Submit_Approve_完整流程_Pending到Approved()
     {
         using var db = TestDbFactory.Create();

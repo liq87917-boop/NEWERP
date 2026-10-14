@@ -223,6 +223,17 @@ public partial class ErpDbContext
         //       只改映射，不新增 / 修改任何表、列、索引、菜单或权限，也不执行任何 DDL / 迁移。
         modelBuilder.Entity<SalesOrder>().Property(x => x.CommissionRatio).HasPrecision(18, 4);
 
+        // ============ ERP-537：采购订单税率的持久化小数位（与 SchemaUpgrader 第 22 段声明同源） ============
+        // 说明：权威升级脚本把 db_owner.PurchaseOrders.TaxRate 声明为 DECIMAL(18,4)
+        //       （IF COL_LENGTH('db_owner.PurchaseOrders', 'TaxRate') IS NULL ... DECIMAL(18,4) NOT NULL DEFAULT 0）。
+        //       EF 模型此前**未**显式 HasPrecision（该处只有 PurchaseOrder.OrderNo 唯一索引），按 SQL Server 默认
+        //       精度把该列映射为 decimal(18,2)，于是合法的 3 / 4 位小数税率（如 0.1250 / 13.0555）会在写入前被
+        //       **静默取整**（13.0555 → 13.06），与声明列不符，也改变了下游报表 / 导出解析出的税务口径。
+        //       这里只对齐该**单列**的映射精度；PurchaseOrders / PurchaseOrderDetails 的其余小数列保持既有
+        //       DECIMAL(18,2) 口径不变（与 PurchaseOrderAmountRules.DecimalScale = 2 同源）。
+        //       只改映射，不新增 / 修改任何表、列、索引、菜单或权限，也不执行任何 DDL / 迁移。
+        modelBuilder.Entity<PurchaseOrder>().Property(x => x.TaxRate).HasPrecision(18, 4);
+
         // ============ 报价单版本链唯一约束（ERP-035） ============
         // 同一版本链内「版本号」唯一：并发创建版本时由该唯一索引在数据库层兜底，链内不可能出现重复版本号
         // （服务端捕获唯一冲突后返回「请重试」的业务错误，见 QuotationRevisionService）。

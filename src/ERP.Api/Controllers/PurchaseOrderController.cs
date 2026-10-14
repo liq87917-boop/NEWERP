@@ -314,8 +314,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// 创建（ERP-425）：无论手工（无归属备货）还是显式链接来源，表头 / 明细 / 单据号预约都在同一原子事务内写入；
     /// 显式来源时先按「来源销售订单行（升序）→ 采购订单行」确定性锁序取得上游行锁（与来源取消串行化），
     /// 再权威解析来源；并发时「来源取消」与「采购创建」只能成功其一。
-    /// <para>ERP-426：实时授权与来源解析之后、<b>单号预约与任何字段 / 明细改写之前</b>执行唯一权威
-    /// <see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>（<see cref="PurchaseOrderAmountRules"/>）；
+    /// <para>ERP-426 / ERP-537：实时授权与来源解析之后、<b>单号预约与任何字段 / 明细改写之前</b>执行唯一权威
+    /// <see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>（<see cref="PurchaseOrderAmountRules"/>），
+    /// 其中税率按声明列 <c>db_owner.PurchaseOrders.TaxRate DECIMAL(18,4)</c> 逐位原样判定（最多 4 位小数，
+    /// 第 5 位小数 / 量级溢出受控拒绝，绝不静默取整）；
     /// 客户端提交的数量 / 单价 / 金额 / 合计 / 状态 / 审计字段一律由服务端重算或重置覆盖，非法请求既不消耗单号也不落库。</para>
     /// </summary>
     [HttpPost]
@@ -378,7 +380,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// 按 Id 升序取得全部必要来源销售订单行锁，再取本采购订单行锁（与提交 / 审核 / 删除 / 取消共用同一把锁）。</para>
     /// <para>锁内重读持久化表头 / 明细 / 状态 / 来源与实时权限：仅待提交可修改、来源指针被并发改写即原子拒绝；
     /// 请求未给出归属来源时保留已存来源（绝不静默清除血缘），显式改绑仍按权威来源重新解析并校验实时已审核来源。</para>
-    /// <para>ERP-426：非法新写入条款在来源加锁之前即被拒绝；改写后的持久化条款在锁内再执行一次唯一权威校验
+    /// <para>ERP-426 / ERP-537：非法新写入条款（含无法在税率列 <c>DECIMAL(18,4)</c> 内逐位原样存储的税率）在来源加锁之前即被拒绝；
+    /// 改写后的持久化条款在锁内再执行一次唯一权威校验
     /// （<see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>），失败时原始表头 / 明细 / 状态与来源血缘保持不变。</para>
     /// </summary>
     [HttpPut("{id:long}")]
@@ -605,8 +608,9 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     public static void Calculate(PurchaseOrder entity) => PurchaseOrderAmountRules.Calculate(entity);
 
     /// <summary>
-    /// 业务字段校验（税率 0~100；历史单据不填时为 0，不受影响）。
-    /// <para>ERP-426：实现位于唯一权威 <see cref="PurchaseOrderAmountRules.Validate" />，与合计算法同源。</para>
+    /// 业务字段校验（税率 0~100 且最多 4 位小数；历史单据不填时为 0，不受影响）。
+    /// <para>ERP-426 / ERP-537：实现位于唯一权威 <see cref="PurchaseOrderAmountRules.Validate" />，与合计算法同源；
+    /// 税率列声明为 <c>DECIMAL(18,4)</c>，无法逐位原样存储的税率一律受控拒绝，绝不静默取整。</para>
     /// </summary>
     public static void Validate(PurchaseOrder entity) => PurchaseOrderAmountRules.Validate(entity);
 

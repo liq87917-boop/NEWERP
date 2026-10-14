@@ -16,7 +16,8 @@ namespace ERP.UnitTests;
 /// 不执行任何 DDL / 部署脚本）：
 /// <list type="number">
 /// <item><b>唯一权威规则</b>（<see cref="PurchaseOrderAmountRules.ValidateNewWrite"/>）：明细非空、数量为正且可表示、
-/// 单价非负且可表示、币种为已定义枚举值、汇率大于 0 且可表示、税率 0~100、逐行金额与总额
+/// 单价非负且可表示、币种为已定义枚举值、汇率大于 0 且可表示、税率 0~100 且最多 4 位小数
+/// （声明列 <c>DECIMAL(18,4)</c>，ERP-537）、逐行金额与总额
 /// 在实际 EF 精度（<c>DECIMAL(18,2)</c>）内 checked 可表示；溢出 / 不可表示一律返回受控业务错误；</item>
 /// <item><b>EF 精度契约</b>：用 SQL Server 提供程序**仅构建模型**（不打开连接）断言采购订单列的实际存储精度
 /// 与规则常量同源；</item>
@@ -116,6 +117,37 @@ public class PurchaseOrderWriteValidationTests
         Assert.Contains("税率", ex.Message);
     }
 
+    [Theory]
+    [InlineData(0.12505)]    // 第 5 位小数：DECIMAL(18,4) 无法逐位原样存储（ERP-537）
+    [InlineData(13.05555)]
+    [InlineData(99.99995)]   // 半进位取整后恰好落到上限：仍按原值拒绝，绝不取整
+    public void 新增写入校验_税率超出四位小数_拒绝(decimal taxRate)
+    {
+        var order = NewOrder(new PurchaseOrderDetail { Quantity = 1m, UnitPrice = 1m });
+        order.TaxRate = taxRate;
+
+        var ex = Assert.Throws<BusinessException>(() => PurchaseOrderAmountRules.ValidateNewWrite(order));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(PurchaseOrderAmountRules.TaxRateScaleText, ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.1250)]
+    [InlineData(13.0555)]
+    [InlineData(99.9999)]
+    [InlineData(100)]
+    public void 新增写入校验_税率四位小数内_原样接受(decimal taxRate)
+    {
+        var order = NewOrder(new PurchaseOrderDetail { Quantity = 1m, UnitPrice = 1m });
+        order.TaxRate = taxRate;
+
+        PurchaseOrderAmountRules.ValidateNewWrite(order);
+
+        // 校验只判定、不改写：四位小数逐位原样保留（ERP-537）。
+        Assert.Equal(taxRate, order.TaxRate);
+    }
+
     [Fact]
     public void 新增写入校验_金额乘法溢出_返回受控业务错误()
     {
@@ -210,7 +242,15 @@ public class PurchaseOrderWriteValidationTests
         Assert.Equal(expected, ColumnType(model, typeof(PurchaseOrderDetail), nameof(PurchaseOrderDetail.Amount)));
         Assert.Equal(expected, ColumnType(model, typeof(PurchaseOrder), nameof(PurchaseOrder.TotalAmount)));
         Assert.Equal(expected, ColumnType(model, typeof(PurchaseOrder), nameof(PurchaseOrder.ExchangeRate)));
-        Assert.Equal(expected, ColumnType(model, typeof(PurchaseOrder), nameof(PurchaseOrder.TaxRate)));
+
+        // ERP-537：税率与建表脚本 db_owner.PurchaseOrders.TaxRate DECIMAL(18,4) 同源，
+        // 其余采购订单 / 明细小数列仍为 DECIMAL(18,2)（口径不变）。
+        Assert.Equal(4, PurchaseOrderAmountRules.TaxRateScale);
+        Assert.Equal("decimal(18,4)", ColumnType(model, typeof(PurchaseOrder), nameof(PurchaseOrder.TaxRate)));
+        var taxRate = model.FindEntityType(typeof(PurchaseOrder))!
+            .FindProperty(nameof(PurchaseOrder.TaxRate))!;
+        Assert.Equal(PurchaseOrderAmountRules.DecimalPrecision, taxRate.GetPrecision());
+        Assert.Equal(PurchaseOrderAmountRules.TaxRateScale, taxRate.GetScale());
     }
 
     // ==================== 3. 控制器：新增 ====================
