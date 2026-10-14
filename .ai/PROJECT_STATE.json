@@ -1,11 +1,14 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-14T05:34:05.063315Z",
+  "updated_at": "2026-10-14T05:52:23.539116Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-524"
+    "ERP-524",
+    "ERP-525",
+    "ERP-526",
+    "ERP-527"
   ],
   "completed": [
     "ERP-000",
@@ -515,17 +518,20 @@
     "log": ".ai\\logs\\ERP-523-validation-1.log",
     "at": "2026-10-14T05:33:59.122097Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-524",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/StockInUnitIntegrityTests.cs\noutside allowed_paths: src/ERP.UnitTests/StockOutUnitIntegrityTests.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-520",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-14T04:34:19.212151Z"
+    "task": "ERP-524",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-14T05:52:23.018851Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "624e172",
+    "local_sha": "afd3002",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -533,10 +539,15 @@
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-524"
+    "ERP-524",
+    "ERP-525",
+    "ERP-526",
+    "ERP-527"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
