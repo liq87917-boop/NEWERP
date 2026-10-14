@@ -310,14 +310,20 @@ public class ExpenseAuthorizationTests
         Assert.Equal("CNY", ExpenseAuthorizationRules.NormalizeCurrencyStrict(null));
         Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeCurrencyStrict("KRW"));
 
-        Assert.Equal(0.01m, ExpenseAuthorizationRules.NormalizeAmount(0.005m));
+        // ERP-538：金额 / 汇率按声明列精度（18,4 / 18,6）**逐位原样**判定（不再按 2 位小数取整）：
+        // 真实可表示的 3 / 4 位小数金额与 3~6 位小数汇率照常放行，过精度 / 越界 / 非正一律拒绝。
+        Assert.Equal(0.005m, ExpenseAuthorizationRules.NormalizeAmount(0.005m));
+        Assert.Equal(1234.5678m, ExpenseAuthorizationRules.NormalizeAmount(1234.5678m));
         Assert.Equal(100m, ExpenseAuthorizationRules.NormalizeAmount(100m));
-        Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeAmount(0.004m));
+        Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeAmount(0.00001m));
+        Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeAmount(0m));
         Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeAmount(-1m));
 
-        Assert.Equal(1.01m, ExpenseAuthorizationRules.NormalizeRate(1.005m));
+        Assert.Equal(1.005m, ExpenseAuthorizationRules.NormalizeRate(1.005m));
+        Assert.Equal(7.123456m, ExpenseAuthorizationRules.NormalizeRate(7.123456m));
+        Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeRate(1.0000005m));
         Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeRate(0m));
-        Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeRate(0.004m));
+        Assert.Throws<BusinessException>(() => ExpenseAuthorizationRules.NormalizeRate(-1m));
     }
 
     [Fact]
@@ -438,7 +444,7 @@ public class ExpenseAuthorizationTests
 
     private static FinanceExpense NewExpense(
         long? customerId, decimal amount = 100m, string currency = "CNY", decimal rate = 1m,
-        string? expenseNo = null, string allocationBatchNo = "")
+        string? expenseNo = null, string allocationBatchNo = "", decimal taxRate = 0m)
         => new()
         {
             ExpenseNo = expenseNo ?? $"EXP-{Guid.NewGuid():N}"[..12],
@@ -447,6 +453,7 @@ public class ExpenseAuthorizationTests
             Amount = amount,
             Currency = currency,
             ExchangeRate = rate,
+            TaxRate = taxRate,
             CustomerId = customerId,
             RefType = "客户",
             RefNo = "TCLU-001",
@@ -475,7 +482,8 @@ public class ExpenseAuthorizationTests
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
             restricted.Create(NewExpense(disabled.Id)));
 
-        // 客户不存在 / 受支持币种 / 取整后为正的金额 / 为正的汇率：与范围无关的写入校验（由特权账号验证）
+        // 客户不存在 / 受支持币种 / 声明列精度（18,4 / 18,6）与正数口径 / 可选标量非负：
+        // 与范围无关的写入校验（由特权账号验证）
         var privileged = NewExpenseController(db, SeedUser(
             db, "u-write-priv", privileged: true,
             menuCodes: ExpenseAuthorizationRules.RequiredMenuCode).Id);
@@ -484,9 +492,15 @@ public class ExpenseAuthorizationTests
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
             privileged.Create(NewExpense(own.Id, currency: "KRW")));
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            privileged.Create(NewExpense(own.Id, amount: 0.004m)));
+            privileged.Create(NewExpense(own.Id, amount: 0.00001m)));         // 第 5 位小数（过精度）
+        await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
+            privileged.Create(NewExpense(own.Id, amount: -1m)));              // 负数金额
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
             privileged.Create(NewExpense(own.Id, rate: 0m)));
+        await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
+            privileged.Create(NewExpense(own.Id, rate: 1.0000005m)));         // 第 7 位小数（过精度）
+        await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
+            privileged.Create(NewExpense(own.Id, taxRate: -1m)));             // 可选标量为负
 
         Assert.Equal(0, await db.FinanceExpenses.CountAsync());
     }

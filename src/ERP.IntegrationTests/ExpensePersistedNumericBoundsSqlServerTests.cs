@@ -18,16 +18,17 @@ using Xunit;
 namespace ERP.IntegrationTests;
 
 /// <summary>
-/// ERP-512 费用单 / 装柜费用分摊「标量实际列精度与派生金额存储边界」的真实 SQL Server 集成测试
+/// ERP-512 / ERP-538 费用单 / 装柜费用分摊「标量声明列精度与派生金额存储边界」的真实 SQL Server 集成测试
 /// （NEWERP_AUTOTEST 护栏）：用与运行时完全相同的调用路径（真实控制器 + 真实 HTTP 身份 + 真实 SQL Server 上下文）验证：
 /// <list type="number">
-/// <item>实际列精度：<c>FinanceExpenses</c> 的金额 / 汇率 / 分摊列按 EF 默认落库为 <c>decimal(18,2)</c>，
-/// ERP-042 批次汇率 <c>decimal(18,6)</c>、分摊行比例 / 基数 <c>decimal(18,4)</c>，与
-/// <see cref="FinancePersistedAmountRules"/> 常量同源；恰好等于上限的金额原样往返，超过上限的金额连原始 EF 写入
-/// 都被真实列 / 驱动拒绝；</item>
-/// <item>费用 CRUD：受权账号提交「取整进位越过上限 / 1e16 / 极大汇率 / 越界折人民币 / 税 / 分摊标量」一律在
-/// **任何表头写入之前**被受控拒绝（同一受权控制器随后合法创建成功，证明拒绝原因是金额而非授权）；</item>
-/// <item>传统分摊：折人民币乘法溢出与分摊总额越界被拒绝且零写入、零单号消耗，合法请求照常落库；</item>
+/// <item>实际列精度：<c>FinanceExpenses</c> 的金额 / 折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额列为
+/// <c>decimal(18,4)</c>、汇率列为 <c>decimal(18,6)</c>（ERP-538 EF 显式声明，与权威建表脚本同源），
+/// ERP-042 批次汇率 <c>decimal(18,6)</c>、分摊行比例 / 基数 <c>decimal(18,4)</c>、批次表头来源金额 / 分摊合计
+/// <c>decimal(18,2)</c>，与 <see cref="FinancePersistedAmountRules"/> 常量同源；恰好等于上限的金额原样往返，
+/// 超过上限的金额连原始 EF 写入都被真实列 / 驱动拒绝；</item>
+/// <item>费用 CRUD：受权账号提交「第 5 位小数 / 第 7 位小数 / 取整进位越过上限 / 1e16 / 负数」一律在
+/// **任何表头写入之前**被受控拒绝（同一受权控制器随后合法创建成功，证明拒绝原因是标量精度而非授权）；</item>
+/// <item>传统分摊：折人民币乘法越界与分摊总额过精度 / 越界被拒绝且零写入、零单号消耗，合法请求照常落库；</item>
 /// <item>ERP-042 批次：真实列内可存储但折人民币派生越界的来源费用与越界基准值都被拒绝（零批次 / 零分摊行 / 零费用行），
 /// 合法「来源 → 分摊生成」流转仍在同一事务内落批次 + 逐行留痕 + 费用单行且行合计恒等于来源金额。</item>
 /// </list>
@@ -39,9 +40,10 @@ namespace ERP.IntegrationTests;
 public sealed class ExpensePersistedNumericBoundsSqlServerTests
     : IClassFixture<ExpensePersistedNumericBoundsSqlServerFixture>
 {
-    private const decimal MaxAmount = FinancePersistedAmountRules.MaxDecimal18Scale2;   // 9_999_999_999_999_999.99
-    private const decimal RoundUpCrossing = 9_999_999_999_999_999.995m;                // 取整进位越过 DECIMAL(18,2) 上限
-    private const decimal OneE16 = 10_000_000_000_000_000m;                            // 1e16（超出上限）
+    private const decimal MaxAmount = FinancePersistedAmountRules.MaxDecimal18Scale4;  // 99_999_999_999_999.9999（金额类声明列上限）
+    private const decimal MaxRate = FinancePersistedAmountRules.MaxDecimal18Scale6;    // 999_999_999_999.999999（汇率声明列上限）
+    private const decimal RoundUpCrossing = 9_999_999_999_999_999.995m;                // 取整进位越过 DECIMAL(18,2) 上限（对 18,4 同样越界）
+    private const decimal OneE16 = 10_000_000_000_000_000m;                            // 1e16（超出 DECIMAL(18,4) 上限）
     private const decimal OneE15 = 1_000_000_000_000_000m;                             // 1e15（超出 DECIMAL(18,4) 上限）
 
     private readonly ExpensePersistedNumericBoundsSqlServerFixture _fixture;
@@ -74,11 +76,15 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
         Assert.Equal(4, FinancePersistedAmountRules.DecimalScale4);
         Assert.Equal(6, FinancePersistedAmountRules.DecimalScale6);
 
-        // EF 模型口径：FinanceExpense 金额 / 汇率 / 分摊列未显式声明精度 → 提供程序默认 decimal(18,2)。
-        Assert.Equal("decimal(18,2)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.Amount)));
-        Assert.Equal("decimal(18,2)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.ExchangeRate)));
-        Assert.Equal("decimal(18,2)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.AllocationRatio)));
-        // ERP-042 批次 / 分摊行：显式列精度。
+        // ERP-538 EF 模型口径：FinanceExpense 金额类列显式 decimal(18,4)、汇率列显式 decimal(18,6)。
+        Assert.Equal("decimal(18,4)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.Amount)));
+        Assert.Equal("decimal(18,6)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.ExchangeRate)));
+        Assert.Equal("decimal(18,4)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.AmountCny)));
+        Assert.Equal("decimal(18,4)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.TaxRate)));
+        Assert.Equal("decimal(18,4)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.TaxAmount)));
+        Assert.Equal("decimal(18,4)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.AllocationRatio)));
+        Assert.Equal("decimal(18,4)", ColumnType(typeof(FinanceExpense), nameof(FinanceExpense.AllocatedAmount)));
+        // ERP-042 批次 / 分摊行：显式列精度（批次表结构不变）。
         Assert.Equal("decimal(18,6)", ColumnType(typeof(FinanceExpenseAllocationBatch),
             nameof(FinanceExpenseAllocationBatch.ExchangeRate)));
         Assert.Equal("decimal(18,2)", ColumnType(typeof(FinanceExpenseAllocationBatch),
@@ -91,11 +97,13 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
             nameof(FinanceExpenseAllocationLine.AllocatedAmountCny)));
 
         // 真实 SQL Server 列类型（INFORMATION_SCHEMA）与规则常量逐字同源。
-        Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "FinanceExpenses", "Amount"));
-        Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "FinanceExpenses", "ExchangeRate"));
-        Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "FinanceExpenses", "AmountCny"));
-        Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "FinanceExpenses", "AllocationRatio"));
-        Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "FinanceExpenses", "AllocatedAmount"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenses", "Amount"));
+        Assert.Equal("decimal(18,6)", await SqlColumnTypeAsync(db, "FinanceExpenses", "ExchangeRate"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenses", "AmountCny"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenses", "TaxRate"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenses", "TaxAmount"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenses", "AllocationRatio"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenses", "AllocatedAmount"));
         Assert.Equal("decimal(18,6)", await SqlColumnTypeAsync(db, "FinanceExpenseAllocationBatches", "ExchangeRate"));
         Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "FinanceExpenseAllocationLines", "Ratio"));
         Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "FinanceExpenseAllocationLines", "AllocatedAmountCny"));
@@ -134,7 +142,7 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
         Guard();
         await using var db = _fixture.CreateDbContext();
 
-        // 真实列精度 decimal(18,2)：SQL Server 对越界标量报「算术溢出」（错误号 8115，与语言无关）。
+        // 真实列精度：SQL Server 对越界标量报「算术溢出」（错误号 8115，与语言无关）——18,2 / 18,4 / 18,6 各自验证。
         var ex = await Assert.ThrowsAsync<SqlException>(() =>
             db.Database.SqlQueryRaw<decimal>("SELECT CAST(10000000000000000.00 AS decimal(18,2)) AS [Value]")
                 .ToListAsync());
@@ -170,12 +178,17 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
 
     [Theory]
     [InlineData("amount-round-up-cross")]
-    [InlineData("amount-1e16")]
-    [InlineData("rate-1e16")]
-    [InlineData("amountcny-1e16")]
-    [InlineData("taxamount-1e16")]
-    [InlineData("allocationratio-1e16")]
-    [InlineData("allocatedamount-1e16")]
+    [InlineData("amount-over-scale")]
+    [InlineData("amount-magnitude")]
+    [InlineData("amount-negative")]
+    [InlineData("rate-over-scale")]
+    [InlineData("rate-magnitude")]
+    [InlineData("amountcny-magnitude")]
+    [InlineData("taxrate-negative")]
+    [InlineData("taxamount-magnitude")]
+    [InlineData("allocationratio-over-scale")]
+    [InlineData("allocationratio-magnitude")]
+    [InlineData("allocatedamount-magnitude")]
     public async Task Create_expense_rejects_unpersistable_scalars_without_write(string scenario)
     {
         Guard();
@@ -188,21 +201,36 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
         switch (scenario)
         {
             case "amount-round-up-cross":
-                entity.Amount = RoundUpCrossing;
+                entity.Amount = RoundUpCrossing;         // 取整进位越过上限：本身不可逐位原样存储
                 break;
-            case "amount-1e16":
+            case "amount-over-scale":
+                entity.Amount = 1.00005m;                // 第 5 位小数
+                break;
+            case "amount-magnitude":
                 entity.Amount = OneE16;
                 break;
-            case "rate-1e16":
+            case "amount-negative":
+                entity.Amount = -1m;
+                break;
+            case "rate-over-scale":
+                entity.ExchangeRate = 1.0000005m;        // 第 7 位小数
+                break;
+            case "rate-magnitude":
                 entity.ExchangeRate = OneE16;
                 break;
-            case "amountcny-1e16":
+            case "amountcny-magnitude":
                 entity.AmountCny = OneE16;
                 break;
-            case "taxamount-1e16":
+            case "taxrate-negative":
+                entity.TaxRate = -1m;
+                break;
+            case "taxamount-magnitude":
                 entity.TaxAmount = OneE16;
                 break;
-            case "allocationratio-1e16":
+            case "allocationratio-over-scale":
+                entity.AllocationRatio = 1.00005m;       // 第 5 位小数
+                break;
+            case "allocationratio-magnitude":
                 entity.AllocationRatio = OneE16;
                 break;
             default:
@@ -212,7 +240,8 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => controller.Create(entity));
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
-        Assert.Contains("DECIMAL(18,2)", ex.Message, StringComparison.Ordinal);
+        if (!scenario.EndsWith("-negative", StringComparison.Ordinal))
+            Assert.Contains("DECIMAL(18,", ex.Message, StringComparison.Ordinal);
 
         // 被拒请求零写入。
         await using (var verify = _fixture.CreateDbContext())
@@ -220,20 +249,26 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
             Assert.Equal(0, await verify.FinanceExpenses.CountAsync(x => x.CustomerId == customer.Id));
         }
 
-        // 同一受权控制器随后合法创建成功（证明拒绝原因是金额边界而非授权）。
+        // 同一受权控制器随后合法创建成功（证明拒绝原因是标量边界而非授权）。
         var created = AssertOk<FinanceExpense>(await controller.Create(NewExpense(customer.Id, $"OK-{Tag()}")));
         Assert.Equal(100m, created.Amount);
 
-        // 恰好上限 + 零值可选字段同样照常落库（真实列原样存储）。
+        // 声明列上限 + 4 位小数 / 6 位小数 + 零值可选字段同样照常落库（真实列逐位原样存储）。
         var maxEx = NewExpense(customer.Id, $"MAX-{Tag()}");
         maxEx.Amount = MaxAmount;
         maxEx.AmountCny = MaxAmount;
+        maxEx.ExchangeRate = MaxRate;
+        maxEx.TaxRate = 1.2345m;
+        maxEx.AllocationRatio = 33.3333m;
         var maxCreated = AssertOk<FinanceExpense>(await controller.Create(maxEx));
         await using (var verify = _fixture.CreateDbContext())
         {
             var stored = await verify.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == maxCreated.Id);
             Assert.Equal(MaxAmount, stored.Amount);
             Assert.Equal(MaxAmount, stored.AmountCny);
+            Assert.Equal(MaxRate, stored.ExchangeRate);
+            Assert.Equal(1.2345m, stored.TaxRate);
+            Assert.Equal(33.3333m, stored.AllocationRatio);
             Assert.Equal(0m, stored.TaxAmount);
             Assert.Equal(0m, stored.AllocatedAmount);
         }
@@ -250,17 +285,22 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
         var userId = await SeedUserAsync(db, ExpenseAuthorizationRules.RequiredMenuCode, "传统分摊精度操作员");
         var controller = NewExpenseController(db, userId);
 
-        // 折人民币 = 原币金额 × 汇率：真实列内各自可存储的极大值相乘仍会溢出 DECIMAL(18,2)（并可能溢出 CLR）→ 受控拒绝。
+        // 折人民币 = 原币金额 × 汇率：真实列内各自可存储的极大值相乘仍会溢出折人民币声明列 → 受控拒绝。
         var overflow = await Assert.ThrowsAsync<BusinessException>(() =>
-            controller.AllocateApply(AllocateRequest(customer.Id, MaxAmount, "USD", MaxAmount)));
+            controller.AllocateApply(AllocateRequest(customer.Id, 1_000_000_000_000m, "USD", MaxRate)));
         Assert.Equal(ErrorCodes.InvalidParameter, overflow.Code);
         Assert.Contains("折人民币金额", overflow.Message, StringComparison.Ordinal);
 
-        // 分摊总额自身超出 DECIMAL(18,2)：同样在单号生成之前拒绝。
+        // 分摊总额自身超出声明列精度（1e15 / 第 5 位小数）：同样在单号生成之前拒绝。
         var bigTotal = await Assert.ThrowsAsync<BusinessException>(() =>
             controller.AllocateApply(AllocateRequest(customer.Id, OneE16, "CNY", 1m)));
         Assert.Equal(ErrorCodes.InvalidParameter, bigTotal.Code);
-        Assert.Contains("DECIMAL(18,2)", bigTotal.Message, StringComparison.Ordinal);
+        Assert.Contains("DECIMAL(18,4)", bigTotal.Message, StringComparison.Ordinal);
+
+        var overScaleTotal = await Assert.ThrowsAsync<BusinessException>(() =>
+            controller.AllocateApply(AllocateRequest(customer.Id, 1.00005m, "CNY", 1m)));
+        Assert.Equal(ErrorCodes.InvalidParameter, overScaleTotal.Code);
+        Assert.Contains("DECIMAL(18,4)", overScaleTotal.Message, StringComparison.Ordinal);
 
         // 被拒请求零写入。
         await using (var verify = _fixture.CreateDbContext())
@@ -309,7 +349,7 @@ public sealed class ExpensePersistedNumericBoundsSqlServerTests
 
         // ① 来源费用在真实列内可存储（恰好上限），但折人民币派生越界：预览与生成都在写入之前受控拒绝。
         var overflowSource = await SeedSourceExpenseAsync(
-            db, $"EXP-{Tag()}", containerNo, MaxAmount, "USD", MaxAmount);
+            db, $"EXP-{Tag()}", containerNo, 1_000_000_000_000m, "USD", MaxRate);
         var previewEx = await Assert.ThrowsAsync<BusinessException>(() => controller.AllocationPreview(
             BatchRequest(overflowSource.Id, list.Id, (participantA.Id, 30m), (participantB.Id, 70m))));
         Assert.Equal(ErrorCodes.InvalidParameter, previewEx.Code);

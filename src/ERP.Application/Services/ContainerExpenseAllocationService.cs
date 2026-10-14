@@ -475,8 +475,11 @@ public static class ContainerExpenseAllocationService
         var exactTotal = shares.Sum(s => ContainerExpenseAllocationRules.ExactShareAmount(
             source.Amount, s.BasisValue, totalBasis, currency));
 
-        // ERP-512：表头派生标量（来源金额 / 分摊合计 / 汇率）同样在计划返回（= 生成写入）之前收敛到各自实际列精度；
-        // 预览与生成共用本计划，因此「预览所示即生成结果」在存储边界上同样成立。
+        // ERP-512 / ERP-538：表头派生标量（来源金额 / 分摊合计 / 汇率）同样在计划返回（= 生成写入）之前收敛到各自
+        // 声明列精度；预览与生成共用本计划，因此「预览所示即生成结果」在存储边界上同样成立。
+        // 注意口径分层：来源费用 FinanceExpense.Amount 的声明列是 DECIMAL(18,4)（已在 BuildPlanAsync 的
+        // EnsureStoredExpenseScalarsRepresentable 内按 4 位逐位原样复核），而批次表头 SourceAmount / AllocatedTotal
+        // 是既有 DECIMAL(18,2) 快照列 —— 这里沿用既有货币精度取整口径收敛，不改批次表结构、不改余差与比例算法。
         FinancePersistedAmountRules.EnsureWithinDecimal18(
             source.Amount, FinancePersistedAmountRules.DecimalScale,
             ContainerExpenseAllocationRules.SourceAmountLabel);

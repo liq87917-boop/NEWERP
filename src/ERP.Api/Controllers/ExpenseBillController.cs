@@ -25,10 +25,11 @@ namespace ERP.Api.Controllers;
 /// 缺失 / 为零 / 未知 / 已删除身份一律受控未认证，禁用账号 / 缺少或被撤销既有菜单一律权限不足；
 /// 绝无匿名 / 管理员 / 环境 / 测试专用开关回退。契约见
 /// <see cref="ExpenseAuthorizationRules.PathIndependenceText"/>。</para>
-/// <para><b>标量实际列精度（ERP-512）</b>：费用 CRUD 的全部客户端可持久化标量（金额 / 汇率 / 折人民币金额 /
-/// 税率 / 税额 / 分摊比例 / 分摊金额）在既有取整之后必须能在实际列精度（<c>DECIMAL(18,2)</c>）内表示；
-/// 传统分摊与 ERP-042 批次的**派生**金额 / 比例 / 折人民币金额在单号生成与任何 <c>Db.Add</c> 之前预计算并校验，
-/// 越界 / 乘法溢出即整批受控拒绝（零单号消耗、零已跟踪行），绝不静默截断 / 取整，也不改写任何历史。</para>
+/// <para><b>标量声明列精度（ERP-512 / ERP-538）</b>：费用 CRUD 的全部客户端可持久化标量（金额 / 折人民币金额 /
+/// 税率 / 税额 / 分摊比例 / 分摊金额）必须**逐位原样**落在声明列精度（<c>DECIMAL(18,4)</c>）内、汇率落在
+/// <c>DECIMAL(18,6)</c> 内；传统分摊与 ERP-042 批次的**派生**金额 / 比例 / 折人民币金额仍在既有货币精度取整之后，
+/// 在单号生成与任何 <c>Db.Add</c> 之前预计算并校验，越界 / 乘法溢出即整批受控拒绝（零单号消耗、零已跟踪行），
+/// 绝不静默截断 / 取整，也不改写任何历史。</para>
 /// </summary>
 [ApiController]
 [Route("api/finance/expenses")]
@@ -84,8 +85,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
 
         var expenseDate = (req.ExpenseDate ?? DateTime.Today).Date;
 
-        // ERP-512：派生金额（分摊金额 / 分摊比例 / 折人民币金额）在**单号生成与任何 Db.Add 之前**全部预计算
-        // 并校验到实际列精度（DECIMAL(18,2)）—— Calculate 是预览与生成共用的收敛边界。
+        // ERP-512 / ERP-538：派生金额（分摊金额 / 分摊比例 / 折人民币金额）在**单号生成与任何 Db.Add 之前**全部
+        // 预计算并校验到声明列精度（金额 18,4 / 折人民币 18,4）—— Calculate 是预览与生成共用的收敛边界。
         // 任一越界 / 乘法溢出即整批受控拒绝：绝不占用单号、绝不留下部分已跟踪行、绝不改写任何既有数据。
         var allocated = Calculate(req);
         var rate = req.ExchangeRate <= 0 ? 1m : req.ExchangeRate;
@@ -187,7 +188,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     }
 
     /// <summary>
-    /// 新增费用单：写入任何字段之前校验拟议客户范围、真实启用客户、受支持币种、取整后为正的金额与汇率；
+    /// 新增费用单：写入任何字段之前校验拟议客户范围、真实启用客户、受支持币种、逐位原样可在声明列内存储且为正的
+    /// 金额（<c>DECIMAL(18,4)</c>）与汇率（<c>DECIMAL(18,6)</c>），以及非负且逐位原样可存储的可选标量；
     /// 分摊批次留痕列（批次号 / 来源费用）由服务端权威写入，客户端提交体中的同名值一律忽略。
     /// </summary>
     [HttpPost]
@@ -411,7 +413,7 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     /// <summary>
     /// 传统「拼柜分摊」请求（预览 / 生成共用）的授权与写入校验：在任何重复检查、单号生成与写入之前调用。
     /// 明细客户必须逐个落在当前账号权威范围内（受限账号 fail closed，不泄露范围外客户）；写入路径还必须指向
-    /// 真实启用客户，且币种受支持、总额按既有存储精度取整后为正、汇率取整后为正。
+    /// 真实启用客户，且币种受支持、总额（<c>DECIMAL(18,4)</c>）与汇率（<c>DECIMAL(18,6)</c>）逐位原样可存储且为正。
     /// <para>ERP-496：权威范围由调用方（动作内 <c>EnsureExpenseAuthorizedAsync</c>）实时解析后传入，<b>必填且非空</b>。</para>
     /// </summary>
     private async Task EnsureLegacyAllocateRequestValidAsync(
@@ -444,9 +446,10 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
 
     /// <summary>
     /// 分摊计算核心（预览与生成**共用**的派生边界）：按指定基数计算各客户权重、比例与分摊金额（末行补齐四舍五入差额）。
-    /// <para>ERP-512：分摊总额与每一行的派生标量（比例 / 分摊金额）在这里按实际列精度 <c>DECIMAL(18,2)</c> 收敛 ——
-    /// 越界、极大权重导致的乘法 / 求和溢出一律受控拒绝，绝不静默截断 / 取整，也不以 <see cref="OverflowException"/> 崩溃。
-    /// 预览与生成因此共享完全一致的边界（预览不会展示生成阶段必然被拒绝的结果）。</para>
+    /// <para>ERP-512 / ERP-538：分摊总额（客户端提交的标量，须逐位原样落在声明列 <c>DECIMAL(18,4)</c> 内）与每一行的
+    /// 派生标量（比例 / 分摊金额）在这里按声明列精度收敛 —— 越界、极大权重导致的乘法 / 求和溢出一律受控拒绝，
+    /// 绝不静默截断 / 取整，也不以 <see cref="OverflowException"/> 崩溃。预览与生成因此共享完全一致的边界
+    /// （预览不会展示生成阶段必然被拒绝的结果）。</para>
     /// </summary>
     private static List<ExpenseAllocateResultItem> Calculate(ExpenseAllocateRequest req)
     {

@@ -442,6 +442,20 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_FinanceExpenses_AllocationBatchNo")
             .HasFilter("IsDeleted = 0 AND AllocationBatchNo <> N''");
 
+        // ERP-538：费用单标量列与权威升级脚本 db_owner.FinanceExpenses 的**声明列类型**逐字同源 ——
+        //   金额 / 折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额 = DECIMAL(18,4)，
+        //   汇率 = DECIMAL(18,6)。
+        // 此前这七列未显式声明精度（HasPrecision），EF SQL Server 提供程序因此按默认 decimal(18,2) 落库：
+        // 真实可表示的 4 位小数金额与 6 位小数汇率会被静默取整到 2 位，与建表脚本 / 权威列声明不一致。
+        // 本次只对齐映射精度（不新增表 / 列 / 索引，不改任何 DDL），写入护栏同步按声明精度**逐位原样**判定。
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.Amount).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.AmountCny).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.TaxRate).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.TaxAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.AllocationRatio).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.AllocatedAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.ExchangeRate).HasPrecision(18, 6);
+
         // ============ ERP-043：供应商采购发票登记（普票 / 专票证据 + 可选采购订单关联） ============
         // 设计口径：
         //   1. 本模块只是**运营证据台账**：不建应付账款 / 账龄 / 税务申报表，不生成凭证、收付款或结算单，

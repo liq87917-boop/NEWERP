@@ -864,12 +864,15 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
         }
 
         // ③ 被拒绝的全部路由零改写：既有费用单未被删除 / 改写，也未新增批次 / 分摊行
+        //     （断言按本用例自己的装柜清单收敛：同夹具下其它用例的批次不属于本清单，不参与判定）。
         await using var verify = _fixture.CreateDbContext();
         var stored = await verify.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == expenseId);
         Assert.False(stored.IsDeleted);
         Assert.Equal(500m, stored.Amount);
-        Assert.Equal(1, await verify.FinanceExpenseAllocationBatches.CountAsync(x => !x.IsDeleted));
-        Assert.Equal(1, await verify.FinanceExpenseAllocationLines.CountAsync(x => !x.IsDeleted));
+        Assert.Equal(1, await verify.FinanceExpenseAllocationBatches
+            .CountAsync(x => !x.IsDeleted && x.LoadingListId == loadingListId));
+        Assert.Equal(1, await verify.FinanceExpenseAllocationLines
+            .CountAsync(x => !x.IsDeleted && x.LoadingListId == loadingListId));
 
         // ④ 已启用且持有既有菜单授权的身份：列表可读（权威范围下推生效）
         var allowed = await TryAuthorizedActionAsync(userId, ctl => ctl.GetPaged(new PageQuery()));

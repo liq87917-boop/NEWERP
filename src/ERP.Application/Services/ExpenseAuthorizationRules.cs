@@ -26,10 +26,14 @@ namespace ERP.Application.Services;
 /// <item><b>写入校验</b>：改写任何字段或生成任何行之前，校验拟议 / 已存储客户的完整范围、真实启用客户、受支持币种、
 /// 取整后为正的金额与为正的汇率；被拒绝的编辑 / 删除 / 预览 / 生成 / 作废绝不改写原行、状态、审计与任何关联证据
 /// （分摊批次只以显式作废（状态 0 + 原因）更正，保留历史）。</item>
-/// <item><b>标量实际列精度（ERP-512）</b>：金额 / 汇率 / 折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额等
-/// **客户端可持久化标量**在既有取整之后，必须能在实际列精度（<c>DECIMAL(18,2)</c>）内表示，越界（含取整进位越界）
-/// 一律受控拒绝；传统分摊与批次生成的**派生**金额 / 比例 / 折人民币金额在单号预约与任何写入之前预计算并校验；
-/// 历史 / 被外部改写的越界来源费用拒绝新的分摊生成但保持可读（绝不静默截断 / 取整，也不改写历史）。</item>
+/// <item><b>标量声明列精度（ERP-512 / ERP-538）</b>：权威建表脚本 <c>db_owner.FinanceExpenses</c> 把
+/// 金额 / 折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额声明为 <c>DECIMAL(18,4)</c>、汇率声明为
+/// <c>DECIMAL(18,6)</c>。<b>客户端可持久化标量</b>（费用新增 / 修改的七个标量与传统分摊总额）按**声明精度逐位原样**
+/// 判定：可表示的值**不取整**、原样落库往返；负数 / 过精度（第 5 / 第 7 位小数）/ 超出量级一律在**任何已跟踪写入
+/// 之前**以既有受控错误拒绝（ERP-538 之前按 <c>DECIMAL(18,2)</c> 取整，会把真实可表示的 4 位小数金额与
+/// 6 位小数汇率静默改写或拒绝）；既有的**派生**金额货币精度取整、分摊余差与比例算法保持不变；传统分摊与批次
+/// 生成的派生金额 / 比例 / 折人民币金额仍在单号预约与任何写入之前预计算并校验；历史 / 被外部改写的越界来源费用
+/// 拒绝新的分摊生成但保持可读（绝不静默截断 / 取整，也不改写历史）。</item>
 /// </list>
 /// <para><b>身份来源唯一</b>：请求提交体中的任何字段都不能指定或扩大账号身份 —— 身份只来自已认证请求主体
 /// （<c>ClaimTypes.NameIdentifier</c>），由调用方（<c>ExpenseBillController</c> 的每一个路由动作）解析后经
@@ -51,28 +55,46 @@ public static class ExpenseAuthorizationRules
     /// <summary>费用单模块菜单中文文案（与既有菜单名一致）</summary>
     public const string RequiredMenuText = "费用单";
 
-    /// <summary>金额 / 汇率的既有存储精度（<c>decimal(18,2)</c>），固定 2 位小数、0.5 进位（不使用银行家舍入）</summary>
+    /// <summary>
+    /// **派生金额**的既有货币精度取整口径（固定 2 位小数、0.5 进位，不使用银行家舍入）：
+    /// 传统「拼柜分摊」的折人民币金额与 ERP-042 批次的逐行分摊金额 / 折人民币金额仍按它取整。
+    /// <para>ERP-538：客户端提交的**标量**不再按本口径取整 —— 它们必须逐位原样落在声明列内
+    /// （金额类 <see cref="PersistedAmountScale"/> = 4 位、汇率 <see cref="PersistedExchangeRateScale"/> = 6 位）。</para>
+    /// </summary>
     public const int AmountDecimals = 2;
 
-    /// <summary>主金额标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
-    public const string AmountOverflowLabel = "费用金额（按既有存储精度取整后）";
+    /// <summary>
+    /// 金额类持久化列的**声明小数位**（<c>Amount</c> / <c>AmountCny</c> / <c>TaxRate</c> / <c>TaxAmount</c> /
+    /// <c>AllocationRatio</c> / <c>AllocatedAmount</c> 均为 <c>DECIMAL(18,4)</c>，与权威建表脚本
+    /// <c>SchemaUpgrader</c> 第 13 段及 ERP-538 的 EF 映射一字同源）。
+    /// </summary>
+    public const int PersistedAmountScale = FinancePersistedAmountRules.DecimalScale4;
 
-    /// <summary>汇率标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
-    public const string ExchangeRateOverflowLabel = "汇率（按既有存储精度取整后）";
+    /// <summary>
+    /// 汇率持久化列的**声明小数位**（<c>ExchangeRate</c> 为 <c>DECIMAL(18,6)</c>，与权威建表脚本
+    /// <c>SchemaUpgrader</c> 第 13 段及 ERP-538 的 EF 映射一字同源）。
+    /// </summary>
+    public const int PersistedExchangeRateScale = FinancePersistedAmountRules.DecimalScale6;
 
-    /// <summary>折人民币金额标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
+    /// <summary>主金额标量超出声明列精度（<c>DECIMAL(18,4)</c>）时的拒绝文案前缀</summary>
+    public const string AmountOverflowLabel = "费用金额";
+
+    /// <summary>汇率标量超出声明列精度（<c>DECIMAL(18,6)</c>）时的拒绝文案前缀</summary>
+    public const string ExchangeRateOverflowLabel = "汇率";
+
+    /// <summary>折人民币金额标量超出声明列精度（<c>DECIMAL(18,4)</c>）时的拒绝文案前缀</summary>
     public const string AmountCnyOverflowLabel = "折人民币金额";
 
-    /// <summary>税率标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
+    /// <summary>税率标量超出声明列精度（<c>DECIMAL(18,4)</c>）时的拒绝文案前缀</summary>
     public const string TaxRateOverflowLabel = "税率";
 
-    /// <summary>税额标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
+    /// <summary>税额标量超出声明列精度（<c>DECIMAL(18,4)</c>）时的拒绝文案前缀</summary>
     public const string TaxAmountOverflowLabel = "税额";
 
-    /// <summary>分摊比例标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
+    /// <summary>分摊比例标量超出声明列精度（<c>DECIMAL(18,4)</c>）时的拒绝文案前缀</summary>
     public const string AllocationRatioOverflowLabel = "分摊比例";
 
-    /// <summary>分摊金额标量超出实际列精度（<c>DECIMAL(18,2)</c>）时的拒绝文案前缀</summary>
+    /// <summary>分摊金额标量超出声明列精度（<c>DECIMAL(18,4)</c>）时的拒绝文案前缀</summary>
     public const string AllocatedAmountOverflowLabel = "分摊金额";
 
     /// <summary>系统支持的币种（与销售订单 / 收款单 / 采购订单币种枚举同源：CNY / USD / EUR / HKD / GBP / JPY）</summary>
@@ -116,11 +138,11 @@ public static class ExpenseAuthorizationRules
     public const string UnsupportedCurrencyText =
         "币种不受支持：只允许 CNY / USD / EUR / HKD / GBP / JPY（不做汇率换算，也不接受未知币种）";
 
-    /// <summary>金额非正的拒绝文案</summary>
-    public const string NonPositiveAmountText = "费用金额按既有存储精度（2 位小数）取整后必须大于 0";
+    /// <summary>金额非正的拒绝文案（ERP-538：金额逐位原样判定，不做任何取整 / 截断）</summary>
+    public const string NonPositiveAmountText = "费用金额必须大于 0（按声明列精度逐位原样判定，不做任何取整 / 截断）";
 
-    /// <summary>汇率非正的拒绝文案</summary>
-    public const string InvalidRateText = "汇率按既有存储精度（2 位小数）取整后必须大于 0";
+    /// <summary>汇率非正的拒绝文案（ERP-538：汇率逐位原样判定，不做任何取整 / 截断）</summary>
+    public const string InvalidRateText = "汇率必须大于 0（按声明列精度逐位原样判定，不做任何取整 / 截断）";
 
     /// <summary>授权与数据范围口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
@@ -171,55 +193,95 @@ public static class ExpenseAuthorizationRules
     }
 
     /// <summary>
-    /// 金额校验：按既有存储精度（2 位小数，0.5 进位）取整后必须大于 0，且取整后的**标量**必须能在实际金额列
-    /// <c>DECIMAL(18,2)</c> 内表示（超出即受控拒绝，绝不静默截断 / 取整）；返回取整后的值。
+    /// 金额校验（ERP-538）：必须**逐位原样**能在声明列 <c>DECIMAL(18,4)</c> 内存储且严格大于 0。
+    /// <para>不再按货币精度取整（那会把真实可存储的 3 / 4 位小数金额静默改写为 2 位）：第 5 位小数（过精度）、
+    /// 超出量级与零 / 负值一律以既有受控错误 <c>InvalidParameter</c> 拒绝；返回**入参原值**。</para>
     /// </summary>
     public static decimal NormalizeAmount(decimal amount)
     {
-        var rounded = Math.Round(amount, AmountDecimals, MidpointRounding.AwayFromZero);
-        if (rounded <= 0m)
-            throw BusinessException.InvalidParameter($"{NonPositiveAmountText}：当前值 {amount} 取整后为 {rounded}");
-        return FinancePersistedAmountRules.EnsureWithinDecimal18(rounded, AmountDecimals, AmountOverflowLabel);
+        if (amount <= 0m)
+            throw BusinessException.InvalidParameter($"{NonPositiveAmountText}：当前值 {amount}");
+        return EnsureWithinDeclaredPrecision(amount, PersistedAmountScale, AmountOverflowLabel);
     }
 
     /// <summary>
-    /// 汇率校验：按既有存储精度（2 位小数，0.5 进位）取整后必须大于 0，且取整后的**标量**必须能在实际汇率列
-    /// <c>DECIMAL(18,2)</c> 内表示（超出即受控拒绝，绝不静默截断 / 取整）；返回取整后的值。
+    /// 汇率校验（ERP-538）：必须**逐位原样**能在声明列 <c>DECIMAL(18,6)</c> 内存储且严格大于 0。
+    /// <para>不再按货币精度取整（那会把真实可存储的 3~6 位小数汇率静默改写为 2 位）：第 7 位小数（过精度）、
+    /// 超出量级与零 / 负值一律受控拒绝；返回**入参原值**。</para>
     /// </summary>
     public static decimal NormalizeRate(decimal exchangeRate)
     {
-        var rounded = Math.Round(exchangeRate, AmountDecimals, MidpointRounding.AwayFromZero);
-        if (rounded <= 0m)
-            throw BusinessException.InvalidParameter($"{InvalidRateText}：当前值 {exchangeRate} 取整后为 {rounded}");
-        return FinancePersistedAmountRules.EnsureWithinDecimal18(rounded, AmountDecimals, ExchangeRateOverflowLabel);
+        if (exchangeRate <= 0m)
+            throw BusinessException.InvalidParameter($"{InvalidRateText}：当前值 {exchangeRate}");
+        return EnsureWithinDeclaredPrecision(
+            exchangeRate, PersistedExchangeRateScale, ExchangeRateOverflowLabel);
     }
 
     /// <summary>
-    /// 单个**客户端可持久化标量**（折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额）的实际列精度判定
-    /// （<c>DECIMAL(18,2)</c>）：已按既有口径取整的值与**零值**（未启用税 / 未分摊）照常放行，
-    /// 只有无法在列内表示的值才受控拒绝（绝不为客户端标量发明任何业务等式或自动修正）。
+    /// 标量是否能在声明列 <c>DECIMAL(18,scale)</c> 内**逐位原样**存储（小数位不超过 <paramref name="scale"/>
+    /// 且绝对值有界；只读判定，不抛异常，允许负值）。
+    /// <para>区间口径复用系统唯一的标量边界规则 <see cref="FinancePersistedAmountRules"/>（支持 2 / 4 / 6），
+    /// 不新增第二套常量；小数位判定与 SQL Server 写入取整同向（0.5 进位）。</para>
     /// </summary>
-    public static decimal EnsureScalarRepresentable(decimal value, string amountLabel)
-        => FinancePersistedAmountRules.EnsureWithinDecimal18(value, AmountDecimals, amountLabel);
-
-    /// <summary>标量是否能在实际金额列（<c>DECIMAL(18,2)</c>）内表示（只读判定，不抛异常）</summary>
-    public static bool IsScalarRepresentable(decimal value)
-        => FinancePersistedAmountRules.IsWithinDecimal18(value, AmountDecimals);
+    public static bool IsWithinDeclaredPrecision(decimal value, int scale)
+        => decimal.Round(value, scale, MidpointRounding.AwayFromZero) == value
+           && FinancePersistedAmountRules.IsWithinDecimal18(value, scale);
 
     /// <summary>
-    /// 传统「拼柜分摊」结果行的派生标量边界（分摊比例 / 分摊金额，实际列精度 <c>DECIMAL(18,2)</c>）：
+    /// 校验（并按原值返回）标量能在声明列 <c>DECIMAL(18,scale)</c> 内逐位原样存储；过精度 / 超出量级即受控拒绝。
+    /// <para>纯判定：**绝不**取整 / 截断 / 夹取入参，也不改写任何状态；<paramref name="amountLabel"/> 只用于错误文案。</para>
+    /// </summary>
+    public static decimal EnsureWithinDeclaredPrecision(decimal value, int scale, string amountLabel)
+    {
+        ArgumentNullException.ThrowIfNull(amountLabel);
+        if (IsWithinDeclaredPrecision(value, scale)) return value;
+        throw BusinessException.InvalidParameter(
+            $"{amountLabel}超出可存储范围（DECIMAL(18,{scale})）：已拒绝，绝不静默截断或取整（当前值 {value}）");
+    }
+
+    /// <summary>
+    /// 单个**客户端可持久化标量**的声明列精度判定（ERP-538：<c>DECIMAL(18,4)</c>）：
+    /// 能在列内**逐位原样**表示的值照常放行（第 5 位小数 / 超出量级受控拒绝），纯判定，不取整。
+    /// <para>本方法只判定「能否原样存储」；客户端可选标量的**非负**语义由
+    /// <see cref="EnsureNonNegativeScalar"/> 在费用新增 / 修改路径上追加。</para>
+    /// </summary>
+    public static decimal EnsureScalarRepresentable(decimal value, string amountLabel)
+        => EnsureWithinDeclaredPrecision(value, PersistedAmountScale, amountLabel);
+
+    /// <summary>标量是否能在金额声明列（<c>DECIMAL(18,4)</c>）内逐位原样表示（只读判定，不抛异常）</summary>
+    public static bool IsScalarRepresentable(decimal value)
+        => IsWithinDeclaredPrecision(value, PersistedAmountScale);
+
+    /// <summary>
+    /// 客户端**可选**标量（折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额）的费用新增 / 修改写入校验
+    /// （ERP-538）：必须非负（零值 = 未启用税 / 未分摊照常放行）且能逐位原样落在声明列 <c>DECIMAL(18,4)</c> 内；
+    /// 负数、第 5 位小数与超出量级一律在**任何已跟踪写入之前**以既有受控错误拒绝。
+    /// <para>本方法不为客户端标量发明任何业务等式，也不做自动修正。</para>
+    /// </summary>
+    public static decimal EnsureNonNegativeScalar(decimal value, string amountLabel)
+    {
+        ArgumentNullException.ThrowIfNull(amountLabel);
+        if (value < 0m)
+            throw BusinessException.InvalidParameter($"{amountLabel}不能为负数：当前值 {value}（费用标量不做负数登记）");
+        return EnsureScalarRepresentable(value, amountLabel);
+    }
+
+    /// <summary>
+    /// 传统「拼柜分摊」结果行的派生标量边界（分摊比例 / 分摊金额，声明列精度 <c>DECIMAL(18,4)</c>）：
     /// 预览与生成共用同一判定，在任何单号预约与写入之前执行；超出即受控拒绝（绝不静默截断 / 取整）。
+    /// <para>派生值沿用既有取整口径（比例 4 位、金额货币精度 2 位），因此照常可在声明列内原样表示；
+    /// 余差承接行的极小负残差仍按既有算法与既有 decimal 列语义放行，绝不改写余差算法。</para>
     /// </summary>
     public static void EnsureAllocateResultRepresentable(decimal ratio, decimal allocatedAmount)
     {
-        EnsureScalarRepresentable(ratio, AllocationRatioOverflowLabel);
-        EnsureScalarRepresentable(allocatedAmount, AllocatedAmountOverflowLabel);
+        EnsureWithinDeclaredPrecision(ratio, PersistedAmountScale, AllocationRatioOverflowLabel);
+        EnsureWithinDeclaredPrecision(allocatedAmount, PersistedAmountScale, AllocatedAmountOverflowLabel);
     }
 
     /// <summary>
     /// 传统分摊行的折人民币金额（与既有口径逐字一致：<c>CNY</c> 原样、其余按 <c>Math.Round(分摊金额 × 汇率, 2)</c>
-    /// 计算），并在**任何单号预约 / 写入之前**按实际列精度 <c>DECIMAL(18,2)</c> 判定（含乘法溢出防护）。
-    /// <para>本方法**只追加**溢出与实际列精度判定：既有取整方式（含既有 <c>Math.Round</c> 语义）、币种口径与
+    /// 计算），并在**任何单号预约 / 写入之前**按折人民币声明列精度 <c>DECIMAL(18,4)</c> 判定（含乘法溢出防护）。
+    /// <para>本方法**只追加**溢出与声明列精度判定：既有取整方式（含既有 <c>Math.Round</c> 语义）、币种口径与
     /// 赋值表达式语义保持不变，绝不静默改写既有折人民币口径。</para>
     /// </summary>
     public static decimal DeriveCnyAmount(decimal allocatedAmount, string? currency, decimal exchangeRate)
@@ -234,25 +296,26 @@ public static class ExpenseAuthorizationRules
     }
 
     /// <summary>
-    /// 已存储费用单**参与派生计算**的标量只读复核（ERP-512）：金额 / 汇率 / 折人民币金额必须能在各自实际列
-    /// （<c>DECIMAL(18,2)</c>）内表示。历史 / 被外部改写的越界值一律按规则冲突受控拒绝 ——
-    /// 绝不静默截断、绝不改写已存储值（更正仍需显式作废 / 人工改写），也不新增任何草稿有效性闸门。
+    /// 已存储费用单**参与派生计算**的标量只读复核（ERP-512 / ERP-538）：金额 / 汇率 / 折人民币金额必须能在各自
+    /// 声明列（<c>DECIMAL(18,4)</c> / <c>DECIMAL(18,6)</c> / <c>DECIMAL(18,4)</c>）内**逐位原样**表示。
+    /// <para>历史 / 被外部改写的越界（过精度 / 超出量级）值一律按规则冲突受控拒绝 ——
+    /// 绝不静默截断、绝不改写已存储值（更正仍需显式作废 / 人工改写），也不新增任何草稿有效性闸门。</para>
     /// </summary>
     public static void EnsureStoredExpenseScalarsRepresentable(FinanceExpense stored)
     {
         ArgumentNullException.ThrowIfNull(stored);
 
         var identity = string.IsNullOrWhiteSpace(stored.ExpenseNo) ? $"Id={stored.Id}" : stored.ExpenseNo.Trim();
-        EnsureStoredScalar(stored.Amount, AmountOverflowLabel, identity);
-        EnsureStoredScalar(stored.ExchangeRate, ExchangeRateOverflowLabel, identity);
-        EnsureStoredScalar(stored.AmountCny, AmountCnyOverflowLabel, identity);
+        EnsureStoredScalar(stored.Amount, PersistedAmountScale, AmountOverflowLabel, identity);
+        EnsureStoredScalar(stored.ExchangeRate, PersistedExchangeRateScale, ExchangeRateOverflowLabel, identity);
+        EnsureStoredScalar(stored.AmountCny, PersistedAmountScale, AmountCnyOverflowLabel, identity);
     }
 
-    private static void EnsureStoredScalar(decimal value, string label, string identity)
+    private static void EnsureStoredScalar(decimal value, int scale, string label, string identity)
     {
-        if (IsScalarRepresentable(value)) return;
+        if (IsWithinDeclaredPrecision(value, scale)) return;
         throw BusinessException.RuleConflict(
-            $"费用单「{identity}」的已存储{label}超出可存储范围（DECIMAL(18,2)）：当前值 {value} —— "
+            $"费用单「{identity}」的已存储{label}超出声明列可存储范围（DECIMAL(18,{scale})）：当前值 {value} —— "
             + "不能继续作为分摊来源（绝不静默截断或取整已存储值，如需更正请显式改写或改选来源费用）");
     }
 
@@ -344,7 +407,9 @@ public static class ExpenseAuthorizationRules
 
     /// <summary>
     /// 拟议费用单（新增 / 修改 / 传统分摊生成）的完整校验：客户范围 → 真实启用客户 → 受支持币种 →
-    /// 取整后为正的金额 → 为正的汇率；任一不满足即在改写任何字段或生成任何行之前拒绝。
+    /// 为正且逐位原样可在声明列（<c>DECIMAL(18,4)</c>）内存储的金额 → 为正且逐位原样可在声明列
+    /// （<c>DECIMAL(18,6)</c>）内存储的汇率 → 非负且逐位原样可存储的可选标量；
+    /// 任一不满足即在改写任何字段或生成任何行之前拒绝。
     /// <para>受限账号不能提交无权威客户归属（CustomerId 为空）的费用单；特权账号的柜级 / 客户级既有口径保持不变。</para>
     /// </summary>
     public static async Task EnsureProposedExpenseValidAsync(
@@ -361,14 +426,14 @@ public static class ExpenseAuthorizationRules
         NormalizeAmount(proposed.Amount);
         NormalizeRate(proposed.ExchangeRate);
 
-        // ERP-512：客户端可持久化的其余标量（折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额）同样必须能在
-        // 实际列精度 DECIMAL(18,2) 内表示；零值（未启用税 / 未分摊）与已取整值照常放行，
-        // 越界值在任何写入之前受控拒绝（既不发明税务等式，也不静默截断 / 取整）。
-        EnsureScalarRepresentable(proposed.AmountCny, AmountCnyOverflowLabel);
-        EnsureScalarRepresentable(proposed.TaxRate, TaxRateOverflowLabel);
-        EnsureScalarRepresentable(proposed.TaxAmount, TaxAmountOverflowLabel);
-        EnsureScalarRepresentable(proposed.AllocationRatio, AllocationRatioOverflowLabel);
-        EnsureScalarRepresentable(proposed.AllocatedAmount, AllocatedAmountOverflowLabel);
+        // ERP-538：客户端可持久化的其余标量（折人民币金额 / 税率 / 税额 / 分摊比例 / 分摊金额）同样必须能在
+        // 声明列精度 DECIMAL(18,4) 内**逐位原样**存储且非负；零值（未启用税 / 未分摊）照常放行，
+        // 负数 / 第 5 位小数 / 超出量级在任何已跟踪写入之前受控拒绝（既不发明税务等式，也不静默截断 / 取整）。
+        EnsureNonNegativeScalar(proposed.AmountCny, AmountCnyOverflowLabel);
+        EnsureNonNegativeScalar(proposed.TaxRate, TaxRateOverflowLabel);
+        EnsureNonNegativeScalar(proposed.TaxAmount, TaxAmountOverflowLabel);
+        EnsureNonNegativeScalar(proposed.AllocationRatio, AllocationRatioOverflowLabel);
+        EnsureNonNegativeScalar(proposed.AllocatedAmount, AllocatedAmountOverflowLabel);
     }
 
     /// <summary>
