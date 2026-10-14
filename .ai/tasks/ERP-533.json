@@ -1,0 +1,73 @@
+{
+  "title": "Persist quotation exchange rate and line prices at their declared six- and four-decimal precision",
+  "description": "Stage 3 sales-chain guard for the quotation that the PI, sales-order, version-chain and quotation report flows resolve. db_owner.Quotations is created by the authoritative upgrade script with ExchangeRate DECIMAL(18,6), TotalAmount DECIMAL(18,4) and TotalAmountCny DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:729-731) and db_owner.QuotationDetails with Quantity, UnitPrice and Amount DECIMAL(18,4) (:757-759), but the EF model declares no precision for Quotation or QuotationDetail (ErpDbContext.Config.cs only sets the quotation-number index at :185, the revision-chain filtered index at :193 and the detail cascade at :568-570, with no precision entries), so EF maps every one of those columns to decimal(18,2). QuotationCommercialValidationRules itself encodes the wrong assumption that the entity is DECIMAL(18,2) (DecimalPrecision/DecimalScale at :29-42 and IsRepresentable at :82-85) and therefore rejects input the declared columns can store verbatim, such as a six-decimal exchange rate of 7.123456 or a four-decimal unit price of 0.0125, while any value that reached EF with more than two decimals would be silently rounded on write. Align the EF mapping with the declared columns and widen only the raw scalar acceptance of the shared contract to what the declared columns can store verbatim (exchange rate strictly positive at six decimals, quantity, unit price and line amounts at four decimals), keeping the existing server-side derivation of line amounts, totals and the CNY total at currency precision through CurrencyAmountRules unchanged, and keeping every route identity, menu, ERP-097 scope, soft-deleted-detail, active-detail, version-chain and source-lineage rule intact. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no report route or template change and no production, credential or environment change. Genuine SQL only on (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Quotation create, update and the operational commitment checks for submit, audit, quotation-to-PI conversion, quotation-to-sales-order conversion, the revision copy and the inquiry-to-quotation conversion validate ExchangeRate against the declared six-decimal db_owner.Quotations.ExchangeRate column and Quantity, UnitPrice and the derived line amounts, TotalAmount and TotalAmountCny against the declared four-decimal columns, accepting verbatim any strictly positive rate up to six decimals and any positive quantity and non-negative unit price up to four decimals that the declared columns can store, rejecting any negative, over-magnitude or more-decimal value with the existing controlled validation error, and leaving the existing server-side currency-precision derivation of line amounts, totals and the CNY total unchanged with no Quotation or QuotationDetail row written on rejection.",
+    "Existing quotation authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing quotation menu resolved before every read and write, the ERP-097 salesperson scope, rejection of soft-deleted detail injection, the required active detail rule for operational commitment, the Currency enum and single-currency rules, client-supplied line amount and total overwrite by the server, the version chain and source lineage rules, and denied writes persisting no Quotation or QuotationDetail row; no permission, menu, table, column, index, report route or report template is added or changed.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact six-decimal exchange-rate maximum and four-decimal quantity or unit-price maximum, half-up rounding that lands exactly on the limit, seventh-decimal rate and fifth-decimal quantity rejection, magnitude rejection, unchanged Quotation and QuotationDetail rows on rejection and the existing quotation commercial-validation and CRUD regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Quotation create, update and the operational commitment checks for submit, audit, quotation-to-PI conversion, quotation-to-sales-order conversion, the revision copy and the inquiry-to-quotation conversion validate ExchangeRate against the declared six-decimal db_owner.Quotations.ExchangeRate column and Quantity, UnitPrice and the derived line amounts, TotalAmount and TotalAmountCny against the declared four-decimal columns, accepting verbatim any strictly positive rate up to six decimals and any positive quantity and non-negative unit price up to four decimals that the declared columns can store, rejecting any negative, over-magnitude or more-decimal value with the existing controlled validation error, and leaving the existing server-side currency-precision derivation of line amounts, totals and the CNY total unchanged with no Quotation or QuotationDetail row written on rejection.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "docs/quotation-persisted-numeric-bounds.md"
+    ],
+    "Existing quotation authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing quotation menu resolved before every read and write, the ERP-097 salesperson scope, rejection of soft-deleted detail injection, the required active detail rule for operational commitment, the Currency enum and single-currency rules, client-supplied line amount and total overwrite by the server, the version chain and source lineage rules, and denied writes persisting no Quotation or QuotationDetail row; no permission, menu, table, column, index, report route or report template is added or changed.": [
+      "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "docs/quotation-commercial-validation.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact six-decimal exchange-rate maximum and four-decimal quantity or unit-price maximum, half-up rounding that lands exactly on the limit, seventh-decimal rate and fifth-decimal quantity rejection, magnitude rejection, unchanged Quotation and QuotationDetail rows on rejection and the existing quotation commercial-validation and CRUD regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/QuotationPersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/QuotationPersistedNumericBoundsSqlServerTests.cs",
+      "docs/quotation-persisted-numeric-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+    "src/ERP.Application/Services/QuotationRevisionService.cs",
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+    "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+    "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+    "src/ERP.UnitTests/QuotationPersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/QuotationPersistedNumericBoundsSqlServerTests.cs",
+    "docs/quotation-commercial-validation.md",
+    "docs/quotation-persisted-numeric-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Application/Services/QuotationCommercialValidationRules.cs:29-42 declares DecimalPrecision 18 and DecimalScale 2 with the comment that Quotations/QuotationDetails have no explicit HasPrecision and are therefore decimal(18,2); :82-85 implements IsRepresentable as decimal.Round(value, DecimalScale) == value plus MinDecimal/MaxDecimal bounds; :171-172 rejects a non-positive or non-representable ExchangeRate and :186-192 rejects a quantity or unit price that is not representable at two decimals, so a six-decimal FX rate or a four-decimal unit price is refused; :194-208 derives and bounds the line amount, total and CNY total; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:185 and :193 configure only the quotation-number index and the revision-chain filtered index and :568-570 only the detail cascade, with no Entity<Quotation> or Entity<QuotationDetail> precision entry, so EF maps ExchangeRate, TotalAmount, TotalAmountCny (src/ERP.Domain/Entities/Quotation.cs:76,79,82) and Quantity, UnitPrice, Amount (:166,169,172) to decimal(18,2); src/ERP.Infrastructure/Data/SchemaUpgrader.cs:729-731 create the header as DECIMAL(18,6)/DECIMAL(18,4)/DECIMAL(18,4) and :757-759 the detail as DECIMAL(18,4); src/ERP.Api/Controllers/QuotationController.cs:459 and :555 (create/update) call ValidateIncomingDraft and :303,:326,:709,:858 call ValidateOperational, src/ERP.Api/Controllers/InquiryQuotationConversion.cs converts approved inquiries through the same contract and :714 of QuotationController converts to PI through the PI contract, so the wrong two-decimal assumption is shared by every quotation entry; ERP-470 added only this contract and no task aligns the declared column precision.",
+  "depends_on": [
+    "ERP-470",
+    "ERP-472"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-533",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T08:13:56.115049Z"
+}

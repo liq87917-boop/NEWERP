@@ -1,0 +1,72 @@
+{
+  "title": "Persist the trade-document header amount at its declared four-decimal precision",
+  "description": "Stage 3 shipping-evidence guard for the trade-document register whose header amount carries the declared invoice value. db_owner.TradeDocuments is created by the authoritative upgrade script with Amount DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:517), but the EF model declares no precision for TradeDocument (ErpDbContext.Config.cs has no Entity<TradeDocument> precision entry), so EF maps TradeDocument.Amount (src/ERP.Domain/Entities/TradeDocument.cs:45-46) to decimal(18,2), and the ERP-518 guard records exactly that wrong assumption: TradeDocumentItemRules.HeaderAmountPrecision/HeaderAmountScale are 18/2 with the comment that the model does not declare it (:86-90), IsHeaderAmountRepresentable and EnsureHeaderAmountRepresentable reuse that scale (:359-360, :377-378), and the shipped document records the same mismatch (docs/trade-document-persisted-numeric-bounds.md:27). A three- or four-decimal invoice amount that the declared column can store verbatim is therefore refused, and any value that reached EF with more than two decimals would be silently rounded on write. Align the EF mapping and the header-amount constants and guards with the declared four-decimal column, keep the item scalar four-decimal and line amount two-decimal rules untouched, and keep the ERP-395 shared parent row lock, the header lifecycle and frozen-status rules, the item snapshot and mismatch-hint behaviour, generation numbering and the no-automatic-header-recomputation boundary intact. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no report route or template change and no production, credential or environment change. Genuine SQL only on (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Trade-document header create, update and generation validate Amount against the declared four-decimal db_owner.TradeDocuments.Amount column, accepting verbatim any representable value up to four decimals and rejecting any over-magnitude or more-than-four-decimal value with the existing controlled validation error instead of the current two-decimal assumption, with the amount stored and read back verbatim through the EF mapping and no TradeDocument row created or changed on rejection.",
+    "Existing trade-document authority, concurrency and item semantics are unchanged: the ERP-395 shared parent row lock and header lifecycle status rules, the frozen-status commercial-field rule, the ERP-518 item scalar four-decimal and line amount two-decimal bounds, item snapshot and mismatch-hint behaviour, generation numbering and the no-automatic-header-recomputation boundary, and live identity, menu and customer scope; no permission, menu, table, column, index or report semantic is added.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal header maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, unchanged TradeDocument and item rows on rejection and the existing trade-document item, mutation and generation regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Trade-document header create, update and generation validate Amount against the declared four-decimal db_owner.TradeDocuments.Amount column, accepting verbatim any representable value up to four decimals and rejecting any over-magnitude or more-than-four-decimal value with the existing controlled validation error instead of the current two-decimal assumption, with the amount stored and read back verbatim through the EF mapping and no TradeDocument row created or changed on rejection.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/TradeDocumentItemRules.cs",
+      "src/ERP.Api/Controllers/TradeDocumentController.cs",
+      "src/ERP.Api/Controllers/TradeDocumentGeneration.cs",
+      "src/ERP.Application/Services/TradeDocumentGenerationMutationRules.cs",
+      "docs/trade-document-persisted-numeric-bounds.md"
+    ],
+    "Existing trade-document authority, concurrency and item semantics are unchanged: the ERP-395 shared parent row lock and header lifecycle status rules, the frozen-status commercial-field rule, the ERP-518 item scalar four-decimal and line amount two-decimal bounds, item snapshot and mismatch-hint behaviour, generation numbering and the no-automatic-header-recomputation boundary, and live identity, menu and customer scope; no permission, menu, table, column, index or report semantic is added.": [
+      "src/ERP.Application/Services/TradeDocumentItemRules.cs",
+      "src/ERP.Api/Controllers/TradeDocumentController.cs",
+      "src/ERP.UnitTests/TradeDocumentItemTests.cs",
+      "src/ERP.UnitTests/TradeDocumentMutationTests.cs",
+      "docs/trade-document-persisted-numeric-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal header maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, unchanged TradeDocument and item rows on rejection and the existing trade-document item, mutation and generation regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/TradeDocumentPersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/TradeDocumentItemTests.cs",
+      "src/ERP.UnitTests/TradeDocumentMutationTests.cs",
+      "src/ERP.IntegrationTests/TradeDocumentPersistedNumericBoundsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/TradeDocumentMutationSqlServerTests.cs",
+      "docs/trade-document-persisted-numeric-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/TradeDocumentItemRules.cs",
+    "src/ERP.Application/Services/TradeDocumentGenerationMutationRules.cs",
+    "src/ERP.Api/Controllers/TradeDocumentController.cs",
+    "src/ERP.Api/Controllers/TradeDocumentGeneration.cs",
+    "src/ERP.UnitTests/TradeDocumentItemTests.cs",
+    "src/ERP.UnitTests/TradeDocumentMutationTests.cs",
+    "src/ERP.UnitTests/TradeDocumentPersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/TradeDocumentMutationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/TradeDocumentPersistedNumericBoundsSqlServerTests.cs",
+    "docs/trade-document-persisted-numeric-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Application/Services/TradeDocumentItemRules.cs:86-90 declares HeaderAmountPrecision 18 and HeaderAmountScale 2 with the comment that the model does not declare precision for the trade-document header amount, so the guard assumes decimal(18,2); :359-360 and :377-378 implement IsHeaderAmountRepresentable and EnsureHeaderAmountRepresentable through FinancePersistedAmountRules.IsWithinDecimal18/EnsureWithinDecimal18 with that two-decimal scale; src/ERP.Api/Controllers/TradeDocumentController.cs:126 (create) and :154 (update) are the only header write gates and call EnsureHeaderAmountRepresentable before persistence, and src/ERP.Application/Services/TradeDocumentGenerationMutationRules.cs:290-295 calls the same guard inside EnsurePersistedBatchRepresentable for generation, so all three entry points share the two-decimal assumption; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:517 creates db_owner.TradeDocuments.Amount as DECIMAL(18,4); src/ERP.Infrastructure/Data/ErpDbContext.Config.cs contains no Entity<TradeDocument> precision entry, so EF maps TradeDocument.Amount (src/ERP.Domain/Entities/TradeDocument.cs:45-46) to decimal(18,2) and would silently round a three/four-decimal value; docs/trade-document-persisted-numeric-bounds.md:27 states verbatim that the header amount is treated as DECIMAL(18,2) because the model does not declare it, which is the documented mismatch this increment closes; ERP-518 bounded only the item scalars and the two-decimal line and header amounts, and no task aligns the header amount with the declared four-decimal column.",
+  "depends_on": [
+    "ERP-518",
+    "ERP-395"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-535",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T08:13:56.119936Z"
+}

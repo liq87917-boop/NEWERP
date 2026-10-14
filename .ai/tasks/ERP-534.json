@@ -1,0 +1,72 @@
+{
+  "title": "Persist proforma-invoice exchange rate, totals and deposit at their declared precision",
+  "description": "Stage 3 sales-chain guard for the proforma invoice that the quotation-to-PI conversion, deposit collection and sales-order conversion flows resolve. db_owner.ProformaInvoices is created by the authoritative upgrade script with ExchangeRate DECIMAL(18,6), TotalAmount DECIMAL(18,4), TotalAmountCny DECIMAL(18,4), DepositRatio DECIMAL(18,4) and DepositAmount DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:820-824) and db_owner.ProformaInvoiceDetails with Quantity, UnitPrice and Amount DECIMAL(18,4) (:850-852), but the EF model declares no precision for ProformaInvoice or ProformaInvoiceDetail (ErpDbContext.Config.cs only sets the PI-number index at :185 and the detail foreign key at :600, with no precision entries), so EF maps every one of those columns to decimal(18,2). ProformaInvoiceCommercialValidationRules encodes the same wrong assumption that the entity is DECIMAL(18,2) (DecimalPrecision/DecimalScale at :31-45 and IsRepresentable usage at :171-172 for the exchange rate, :186-192 for quantity and unit price and :260 for the deposit) and therefore rejects input the declared columns can store verbatim, such as a six-decimal exchange rate of 7.123456 or a four-decimal deposit ratio of 30.1250, while any value that reached EF with more than two decimals would be silently rounded on write. Align the EF mapping with the declared columns and widen only the raw scalar acceptance to what the declared columns can store verbatim (exchange rate strictly positive at six decimals, quantity, unit price, line amounts, totals, deposit ratio and deposit amount at four decimals), keeping the existing zero-deposit auto-calculation, the deposit-not-exceeding-total rule and the currency-precision derivation of amounts unchanged, and keeping every route identity, menu, ERP-097 scope, soft-deleted-detail, active-detail, master-reference and source-lineage rule intact. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no report route or template change and no production, credential or environment change. Genuine SQL only on (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Proforma-invoice create, update, quotation-to-PI conversion and the operational commitment checks for submit, audit and sales-order conversion validate ExchangeRate against the declared six-decimal db_owner.ProformaInvoices.ExchangeRate column and Quantity, UnitPrice, the derived line amounts, TotalAmount, TotalAmountCny, DepositRatio and DepositAmount against the declared four-decimal columns, accepting verbatim any strictly positive rate up to six decimals and any representable quantity, unit price, total, ratio or deposit up to four decimals, keeping the existing zero-deposit auto-calculation, the deposit-not-exceeding-total rule and the currency-precision derivation of amounts, and rejecting any negative, over-magnitude or more-decimal value with the existing controlled validation error with no ProformaInvoice or ProformaInvoiceDetail row written on rejection.",
+    "Existing proforma-invoice authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing PI menu resolved before every read and write, the ERP-097 salesperson scope, rejection of soft-deleted detail injection, the required active detail rule for operational commitment, the Currency enum and single-currency rules, master-reference validation, client-supplied line amount, total and automatic deposit overwrite by the server, and denied writes persisting no ProformaInvoice or ProformaInvoiceDetail row; no permission, menu, table, column, index, report route or report template is added or changed.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact six-decimal exchange-rate maximum and four-decimal quantity, unit-price, ratio and deposit maximum, half-up rounding that lands exactly on the limit, seventh-decimal rate and fifth-decimal quantity or ratio rejection, magnitude rejection, unchanged ProformaInvoice and ProformaInvoiceDetail rows on rejection and the existing PI commercial-validation and mutation regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Proforma-invoice create, update, quotation-to-PI conversion and the operational commitment checks for submit, audit and sales-order conversion validate ExchangeRate against the declared six-decimal db_owner.ProformaInvoices.ExchangeRate column and Quantity, UnitPrice, the derived line amounts, TotalAmount, TotalAmountCny, DepositRatio and DepositAmount against the declared four-decimal columns, accepting verbatim any strictly positive rate up to six decimals and any representable quantity, unit price, total, ratio or deposit up to four decimals, keeping the existing zero-deposit auto-calculation, the deposit-not-exceeding-total rule and the currency-precision derivation of amounts, and rejecting any negative, over-magnitude or more-decimal value with the existing controlled validation error with no ProformaInvoice or ProformaInvoiceDetail row written on rejection.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "docs/proforma-invoice-persisted-numeric-bounds.md"
+    ],
+    "Existing proforma-invoice authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing PI menu resolved before every read and write, the ERP-097 salesperson scope, rejection of soft-deleted detail injection, the required active detail rule for operational commitment, the Currency enum and single-currency rules, master-reference validation, client-supplied line amount, total and automatic deposit overwrite by the server, and denied writes persisting no ProformaInvoice or ProformaInvoiceDetail row; no permission, menu, table, column, index, report route or report template is added or changed.": [
+      "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "docs/proforma-invoice-commercial-validation.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact six-decimal exchange-rate maximum and four-decimal quantity, unit-price, ratio and deposit maximum, half-up rounding that lands exactly on the limit, seventh-decimal rate and fifth-decimal quantity or ratio rejection, magnitude rejection, unchanged ProformaInvoice and ProformaInvoiceDetail rows on rejection and the existing PI commercial-validation and mutation regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/ProformaInvoicePersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceCommercialValidationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoicePersistedNumericBoundsSqlServerTests.cs",
+      "docs/proforma-invoice-persisted-numeric-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+    "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+    "src/ERP.UnitTests/ProformaInvoicePersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/ProformaInvoiceCommercialValidationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ProformaInvoicePersistedNumericBoundsSqlServerTests.cs",
+    "docs/proforma-invoice-commercial-validation.md",
+    "docs/proforma-invoice-persisted-numeric-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs:31-45 declares DecimalPrecision 18 and DecimalScale 2 with the comment that ProformaInvoices/ProformaInvoiceDetails have no explicit HasPrecision and are therefore decimal(18,2); IsRepresentable is used at :171-172 for the exchange rate, :186-192 for quantity and unit price, :194-208 for the line amount, total and CNY total and :260 for the deposit; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:185 configures only the PI-number index and :600 only the detail foreign key PiId, with no Entity<ProformaInvoice> or Entity<ProformaInvoiceDetail> precision entry, so EF maps ExchangeRate, TotalAmount, TotalAmountCny, DepositRatio, DepositAmount (src/ERP.Domain/Entities/ProformaInvoice.cs:95,98,101,104,107) and Quantity, UnitPrice, Amount (:162,165,168) to decimal(18,2); src/ERP.Infrastructure/Data/SchemaUpgrader.cs:820-824 create the header as DECIMAL(18,6) and four DECIMAL(18,4) columns and :850-852 the detail as DECIMAL(18,4); src/ERP.Api/Controllers/ProformaInvoiceController.cs:215,:271 and :294 call ValidateIncomingDraft (create, update and prefill save) and :342,:373,:547 call ValidateOperational, while src/ERP.Api/Controllers/QuotationController.cs:714 creates a PI through the same contract, so the two-decimal assumption is shared by every PI entry; ERP-471 added only this contract and no task aligns the declared column precision.",
+  "depends_on": [
+    "ERP-471"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-534",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T08:13:56.117983Z"
+}

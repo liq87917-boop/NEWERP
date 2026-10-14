@@ -1,0 +1,66 @@
+{
+  "title": "Store sample quantity and sample fee at their declared four-decimal precision",
+  "description": "Stage 3 CRM guard for the sample register that the sample page and the ERP-063 attachment evidence contract maintain. db_owner.Samples is created by the authoritative upgrade script with Quantity DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:663) and SampleFee DECIMAL(18,4) (:665), and SampleAuthorizationRules already documents those two columns as DECIMAL(18,4) (MaxDecimalMagnitude at :74-78, item list at :179-180), but the only numeric check is the magnitude comparison in EnsureNonNegativePersistedDecimal (:277-284, called from :203-204), which never verifies the decimal scale, and the EF model declares no precision for Sample (ErpDbContext.Config.cs has no Entity<Sample> precision entry), so EF maps both columns to decimal(18,2) and a three- or four-decimal quantity or sample fee such as 0.0125 passes validation and is silently rounded on write, changing sample-cost evidence. Align the EF mapping with the declared four-decimal columns, exactly as was already done for BaseProduct and BaseSupplier/BaseCustomer, and make the create and update guard reject, never round, any quantity or fee that cannot be stored verbatim at four decimals, before any Samples row is written. Keep the ERP-459 live enabled identity, account status and sample menu authority on all seven routes, the ERP-097 customer scope, the text length bounds, the non-negative values and the CustomerId, ProductId and SalesmanId existence rules unchanged; the entity attributes stay untouched because the precision belongs to the fluent mapping. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL and no production, credential or environment change. Genuine SQL only on (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Require safe Release with analyzers and warnings as errors, the full unit suite and the relevant genuine SQL tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Sample create and update validate Quantity and SampleFee against the declared four-decimal persisted mapping (db_owner.Samples.Quantity and db_owner.Samples.SampleFee DECIMAL(18,4)) and reject any negative, over-magnitude or more-than-four-decimal value with the existing controlled validation error instead of silently rounding it, while every value within the declaration round-trips verbatim through the EF mapping and no Samples row is written on rejection.",
+    "Existing sample authority and semantics are unchanged: the ERP-459 live enabled nondeleted identity, account status and existing sample functional menu resolved before every read and write on all seven routes, the ERP-097 customer scope filtering reads and constraining written CustomerId, the SampleNo and text length bounds, non-negative Quantity and SampleFee, the CustomerId, ProductId and SalesmanId existence rules and the ERP-063 attachment ownership contract; denied writes persist no Samples row and no permission, menu, table, column or index is added.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, negative rejection, unchanged Samples rows on rejection and the existing sample authorization regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Sample create and update validate Quantity and SampleFee against the declared four-decimal persisted mapping (db_owner.Samples.Quantity and db_owner.Samples.SampleFee DECIMAL(18,4)) and reject any negative, over-magnitude or more-than-four-decimal value with the existing controlled validation error instead of silently rounding it, while every value within the declaration round-trips verbatim through the EF mapping and no Samples row is written on rejection.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/SampleController.cs",
+      "docs/sample-persisted-numeric-bounds.md"
+    ],
+    "Existing sample authority and semantics are unchanged: the ERP-459 live enabled nondeleted identity, account status and existing sample functional menu resolved before every read and write on all seven routes, the ERP-097 customer scope filtering reads and constraining written CustomerId, the SampleNo and text length bounds, non-negative Quantity and SampleFee, the CustomerId, ProductId and SalesmanId existence rules and the ERP-063 attachment ownership contract; denied writes persist no Samples row and no permission, menu, table, column or index is added.": [
+      "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/SampleController.cs",
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+      "docs/sample-authority.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude rejection, negative rejection, unchanged Samples rows on rejection and the existing sample authorization regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\\\NEWERP_AutoAcceptance and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/SamplePersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SampleAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/SamplePersistedNumericBoundsSqlServerTests.cs",
+      "docs/sample-persisted-numeric-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/SampleController.cs",
+    "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+    "src/ERP.UnitTests/SamplePersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/SampleAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/SamplePersistedNumericBoundsSqlServerTests.cs",
+    "docs/sample-authority.md",
+    "docs/sample-persisted-numeric-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Application/Services/SampleAuthorizationRules.cs:74-78 declares MaxDecimalMagnitude 99999999999999.9999 with the comment that Quantity and SampleFee are DECIMAL(18,4); :179-180 documents the same for both columns but :203-204 route them to EnsureNonNegativePersistedDecimal, which at :277-284 only compares against the magnitude and never checks the decimal scale, so a fifth-or-more-decimal value or any three/four-decimal value is accepted unchecked; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs contains no Entity<Sample> precision entry (the file only configures the sample-independent indexes shown at :168-200) so EF maps Sample.Quantity (src/ERP.Domain/Entities/Sample.cs:45) and Sample.SampleFee (:52) to decimal(18,2) and silently rounds three/four-decimal values; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:663 and :665 create those two columns as DECIMAL(18,4); src/ERP.Api/Controllers/SampleController.cs:103-115 is the only create/update gate and calls SampleAuthorizationRules.Validate after EnsureAuthorizedScopeAsync (:104 and :115); ERP-459 added only the authority, scope, text bounds, non-negative and magnitude checks (src/ERP.UnitTests/SampleAuthorizationTests.cs) and no task covers the decimal scale or the EF precision mapping; the precedent fix is ErpDbContext.Config.cs:42-96 with src/ERP.UnitTests/ProductMasterPersistedNumericBoundsTests.cs and src/ERP.UnitTests/MasterDataRatePersistedBoundsTests.cs (ERP-530/ERP-531). Entity attributes remain unchanged; only the fluent precision declaration and the guard change.",
+  "depends_on": [
+    "ERP-459",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-532",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T08:13:56.113531Z"
+}
