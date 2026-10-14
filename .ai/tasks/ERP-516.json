@@ -1,0 +1,98 @@
+{
+  "title": "Bound explicit agency fee agreement fixed terms before evidence registration",
+  "description": "Close explicit agency service agreement fixed-amount storage gap. ValidateFeeTerms rate path already bounds0..100 with4-decimal rounding; fixed path only currency-rounds then requires>0, leaving unlimited positive values for explicit FixedAmount18,2. Reuse scalar guard after currency rounding, preserving fee-method exclusivity and existing supported currencies. Revalidate stored terms at registration before status/audit fields freeze; refuse unpersistable/precision-inconsistent stored terms without rewriting history. No fee inference from agreements, no automatic service statements/receipt/accounting; existing read/void remains. Do not extend unrelated commission workflows. Reuse existing layers, authority, source ownership, transactions/locks and audited service writes. No schema/migration, new grants or production access. Do not cap global CurrencyAmountRules or legitimate read-side aggregates. Do not silently repair historical snapshots; preserve historical read/void/cancel and existing undo semantics. Adapt related original fixtures with genuine live identities/masters and original assertions intact. Exact explicit logs/TRX/results under .ai/logs/<task> only; retain complete original failed logs and accurate real environment blockers. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+    "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+    "docs/agency-agreement-persisted-terms.md",
+    "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+    "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+    "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Authorized agreement create/update rejects fixed amount outside actual decimal18,2 after currency rounding before any stored mutation; preserve positive fixed, bounded rate0..100 and4-decimal rule, exclusive fee method, explicit customer/date/currency and no inference.",
+    "Registration validates stored fee terms including exact representability under existing lifecycle/authority before freezing status/recorded fields; failure preserves agreement, source references and audit. Historical reads/void remain available under original rules; no backfill or automatic fee posting.",
+    "Meaningful pure/controller/service and genuine isolated SQL verify actual column precision, exact bound/round-up/huge decimals, zero-decimal currency, valid rate/fixed registration, malformed stored terms and denied zero writes/audit changes. Run original agency agreement scope/terms/registration/void SQL regressions and safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Authorized agreement create/update rejects fixed amount outside actual decimal18,2 after currency rounding before any stored mutation; preserve positive fixed, bounded rate0..100 and4-decimal rule, exclusive fee method, explicit customer/date/currency and no inference.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+      "docs/agency-agreement-persisted-terms.md",
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs"
+    ],
+    "Registration validates stored fee terms including exact representability under existing lifecycle/authority before freezing status/recorded fields; failure preserves agreement, source references and audit. Historical reads/void remain available under original rules; no backfill or automatic fee posting.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+      "docs/agency-agreement-persisted-terms.md",
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs"
+    ],
+    "Meaningful pure/controller/service and genuine isolated SQL verify actual column precision, exact bound/round-up/huge decimals, zero-decimal currency, valid rate/fixed registration, malformed stored terms and denied zero writes/audit changes. Run original agency agreement scope/terms/registration/void SQL regressions and safe Release/full units.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+      "docs/agency-agreement-persisted-terms.md",
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyAgreementPersistedTermsTests.cs",
+      "src/ERP.IntegrationTests/AgencyAgreementPersistedTermsSqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "AgencyServiceFeeAgreementRules.ValidateFeeTerms:214-259 fixed branch only RoundAmount then>0; Config:1013 sets rate9,4 and1014 FixedAmount18,2. AgreementService.RecordAsync:230-244 only state then freezes audit. ERP-069/439 agreement evidence/authority do not provide scalar storage bounds. Full history/docs search found no fixed-term storage-bound task.",
+  "depends_on": [
+    "ERP-515",
+    "ERP-069",
+    "ERP-439",
+    "ERP-508"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-516",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T02:45:37.540446Z"
+}
