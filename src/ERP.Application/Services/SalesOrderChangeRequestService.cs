@@ -16,7 +16,8 @@ namespace ERP.Application.Services;
 /// <item><b>编辑草稿</b>（<see cref="UpdateDraftAsync"/>）：仅草稿可编辑；拟议明细**按位置**与来源行对照
 /// （前 N 行对应来源行，可标记移除；之后为新增行），来源快照列永不被覆盖；</item>
 /// <item><b>金额与校验</b>：拟议明细金额、总额、定金金额一律由
-/// <see cref="SalesOrderAmountRules"/>（销售订单唯一权威算法）重算，数量 / 单价 / 定金比例 / 佣金比例同口径校验，
+/// <see cref="SalesOrderAmountRules"/>（销售订单唯一权威算法）重算，数量 / 单价 / 定金比例 / 佣金比例同口径校验
+/// （ERP-536：佣金比例按声明列 <c>DECIMAL(18,4)</c> 逐位原样判定），
 /// 不接受客户端合计，也不引入第二套算法；</item>
 /// <item><b>提交</b>（<see cref="SubmitAsync"/>）：冻结拟议快照并记录提交时间，之后不可编辑；
 /// <b>取消</b>（<see cref="CancelAsync"/>）：必须填写原因，保留原始与拟议证据，绝不做硬删除；</item>
@@ -747,7 +748,8 @@ public static class SalesOrderChangeRequestService
     /// <summary>
     /// 按 <see cref="SalesOrderAmountRules"/>（销售订单唯一权威算法）重算拟议明细金额、拟议总额与拟议定金金额，
     /// 并复用同一套**新写入校验**（ERP-422）校验明细数量 / 单价 / 币种 / 汇率 / 金额精度、定金比例（0~100）
-    /// 与佣金比例（0~100）。
+    /// 与佣金比例（0~100 且最多 4 位小数，与声明列 <c>DECIMAL(18,4)</c> 同源；无法原样存储的比例受控拒绝，
+    /// 绝不静默取整，ERP-536）。
     /// <para>做法：把拟议值装配成一张**未落库**的销售订单草稿，交给同一套算法与校验处理，再把结果写回申请行 ——
     /// 系统内不存在第二套销售订单金额算法，也不存在第二套新增写入校验。</para>
     /// </summary>

@@ -273,6 +273,38 @@ public class SalesOrderConversionTests
         Assert.Empty(db.SalesOrders);
     }
 
+    [Fact]
+    public async Task 报价单转销售订单_客户佣金比例四位小数_原样保留()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        customer.CommissionRatio = 0.1250m;              // ERP-531 已对齐四位小数：合法值原样带入
+        db.SaveChanges();
+        var quotation = SeedQuotation(db, "QT-CR-4", DocumentStatus.Approved, customer.Id);
+
+        await NewQuotationController(db).ToSalesOrder(quotation.Id);
+
+        Assert.Equal(0.1250m, db.SalesOrders.Single().CommissionRatio);
+    }
+
+    [Fact]
+    public async Task 报价单转销售订单_客户佣金比例五位小数_受控拒绝且不落库()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        customer.CommissionRatio = 12.34567m;            // 无法在声明列 DECIMAL(18,4) 内逐位原样存储
+        db.SaveChanges();
+        var quotation = SeedQuotation(db, "QT-CR-5", DocumentStatus.Approved, customer.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => NewQuotationController(db).ToSalesOrder(quotation.Id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(SalesOrderAmountRules.CommissionRatioScaleText, ex.Message);
+        Assert.Empty(db.SalesOrders);
+        Assert.Equal(DocumentStatus.Approved, db.Quotations.Single().Status);   // 来源状态不变
+    }
+
     // ==================== 形式发票 PI → 销售订单 ====================
 
     [Fact]

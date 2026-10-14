@@ -123,7 +123,9 @@ public static class SalesOrderMutationRules
     /// **确定性锁协议 / 原子事务**串成一条不可绕过的服务端校验 —— 调用方必须在「单号预约与字段改写之前」
     /// （新增 / 修改）或「既有订单行锁内、提交之前」（提交 / 审核）调用本方法。
     /// <para>实现只委托 <see cref="SalesOrderAmountRules.ValidateNewWrite"/>（系统内唯一权威口径），
-    /// 因此不存在第二套数量 / 单价 / 币种 / 汇率 / 比例 / 金额精度规则；本方法不写库、不改写任何字段。</para>
+    /// 因此不存在第二套数量 / 单价 / 币种 / 汇率 / 比例 / 金额精度规则；本方法不写库、不改写任何字段。
+    /// ERP-536：佣金比例按声明列 <c>DECIMAL(18,4)</c> 逐位原样判定 —— 五位小数 / 量级溢出在单号预约与
+    /// 任何字段改写之前受控拒绝，绝不静默取整。</para>
     /// </summary>
     public static void EnsureValidatedTerms(SalesOrder order)
         => SalesOrderAmountRules.ValidateNewWrite(order);
@@ -132,7 +134,8 @@ public static class SalesOrderMutationRules
     public const string ValidatedTermsText =
         "ERP-422：规范销售订单的新增 / 修改在单号预约与任何字段改写之前、提交 / 审核在既有订单行锁内提交之前，"
         + "一律复用 SalesOrderAmountRules.ValidateNewWrite（唯一权威口径）校验「有效明细非空、数量为正且可表示、"
-        + "单价非负且可表示、币种为已定义枚举值、汇率为正且可表示、定金 / 佣金比例 0~100、逐行金额与总额 / 定金"
+        + "单价非负且可表示、币种为已定义枚举值、汇率为正且可表示、定金比例 0~100、佣金比例 0~100 且最多 4 位小数"
+        + "（db_owner.SalesOrders.CommissionRatio 声明为 DECIMAL(18,4)，ERP-536）、逐行金额与总额 / 定金"
         + "在实际 EF 精度（DECIMAL(18,2)）内 checked 可表示」；任一项不满足即返回受控业务错误"
         + "（ErrorCodes.InvalidParameter），绝不静默取整、绝不把正数量舍入为 0，也绝不落库与明细合计不一致的金额。"
         + "客户端提交的金额 / 合计 / 定金一律由服务端按明细重算覆盖，历史读取 / 打印不调用本校验、不被自动修正。";

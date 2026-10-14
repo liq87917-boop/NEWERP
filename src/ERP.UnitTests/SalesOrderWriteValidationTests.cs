@@ -16,8 +16,9 @@ namespace ERP.UnitTests;
 /// 不执行任何 DDL / 部署脚本）：
 /// <list type="number">
 /// <item><b>唯一权威规则</b>（<see cref="SalesOrderAmountRules.ValidateNewWrite"/>）：明细非空、数量为正且可表示、
-/// 单价非负且可表示、币种为已定义枚举值、汇率大于 0 且可表示、定金 / 佣金比例 0~100、逐行金额与总额 / 定金
-/// 在实际 EF 精度（<c>DECIMAL(18,2)</c>）内 checked 可表示；溢出 / 不可表示一律返回受控业务错误；</item>
+/// 单价非负且可表示、币种为已定义枚举值、汇率大于 0 且可表示、定金比例 0~100、佣金比例 0~100 且最多 4 位小数
+/// （声明列 <c>DECIMAL(18,4)</c>，ERP-536）、逐行金额与总额 / 定金在实际 EF 精度（<c>DECIMAL(18,2)</c>）内
+/// checked 可表示；溢出 / 不可表示一律返回受控业务错误；</item>
 /// <item><b>EF 精度契约</b>：用 SQL Server 提供程序**仅构建模型**（不打开连接）断言销售订单列的实际存储精度
 /// 与规则常量同源；</item>
 /// <item><b>控制器行为</b>：新增 / 修改在单号预约与字段改写之前拒绝非法条款且零写入；客户端伪造合计 / 定金
@@ -120,7 +121,10 @@ public class SalesOrderWriteValidationTests
     [Theory]
     [InlineData(-0.5)]
     [InlineData(101)]
-    public void 新增写入校验_佣金比例越界_拒绝(decimal commissionRatio)
+    [InlineData(0.12505)]    // 第 5 位小数：DECIMAL(18,4) 无法逐位原样存储（ERP-536）
+    [InlineData(12.34567)]
+    [InlineData(99.99995)]   // 半进位取整后恰好落到上限：仍按原值拒绝，绝不取整
+    public void 新增写入校验_佣金比例越界或超出四位小数_拒绝(decimal commissionRatio)
     {
         var order = NewOrder(new SalesOrderDetail { Quantity = 1m, UnitPrice = 1m });
         order.CommissionRatio = commissionRatio;
@@ -128,6 +132,23 @@ public class SalesOrderWriteValidationTests
         var ex = Assert.Throws<BusinessException>(() => SalesOrderAmountRules.ValidateNewWrite(order));
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
         Assert.Contains("佣金比例", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.1250)]
+    [InlineData(12.3456)]
+    [InlineData(99.9999)]
+    [InlineData(100)]
+    public void 新增写入校验_佣金比例四位小数内_原样接受(decimal commissionRatio)
+    {
+        var order = NewOrder(new SalesOrderDetail { Quantity = 1m, UnitPrice = 1m });
+        order.CommissionRatio = commissionRatio;
+
+        SalesOrderAmountRules.ValidateNewWrite(order);
+
+        // 校验只判定、不改写：四位小数逐位原样保留（ERP-536）。
+        Assert.Equal(commissionRatio, order.CommissionRatio);
     }
 
     [Fact]
@@ -241,7 +262,15 @@ public class SalesOrderWriteValidationTests
         Assert.Equal(expected, ColumnType(model, typeof(SalesOrder), nameof(SalesOrder.DepositAmount)));
         Assert.Equal(expected, ColumnType(model, typeof(SalesOrder), nameof(SalesOrder.ExchangeRate)));
         Assert.Equal(expected, ColumnType(model, typeof(SalesOrder), nameof(SalesOrder.DepositRatio)));
-        Assert.Equal(expected, ColumnType(model, typeof(SalesOrder), nameof(SalesOrder.CommissionRatio)));
+
+        // ERP-536：佣金比例与建表脚本 db_owner.SalesOrders.CommissionRatio DECIMAL(18,4) 同源，
+        // 其余销售订单 / 明细小数列仍为 DECIMAL(18,2)（口径不变）。
+        Assert.Equal(4, SalesOrderAmountRules.CommissionRatioScale);
+        Assert.Equal("decimal(18,4)", ColumnType(model, typeof(SalesOrder), nameof(SalesOrder.CommissionRatio)));
+        var commission = model.FindEntityType(typeof(SalesOrder))!
+            .FindProperty(nameof(SalesOrder.CommissionRatio))!;
+        Assert.Equal(SalesOrderAmountRules.DecimalPrecision, commission.GetPrecision());
+        Assert.Equal(SalesOrderAmountRules.CommissionRatioScale, commission.GetScale());
     }
 
     // ==================== 3. 控制器：新增 ====================

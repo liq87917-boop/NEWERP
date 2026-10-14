@@ -325,7 +325,11 @@ public static class SalesOrderConversion
         order.NotifyParty = Clamp(customer.NotifyParty, 300);
         order.ShippingMarks = Clamp(customer.DefaultShippingMark, 500);
         order.BusinessNature = Clamp(customer.BusinessNature, 20);
-        // 佣金比例只接受 0~100（销售订单佣金校验同一区间，超出范围按未维护处理）
+        // 佣金比例只接受 0~100（销售订单佣金校验同一区间，超出范围按未维护处理）。
+        // ERP-531 已把 BaseCustomer.CommissionRatio 对齐为 DECIMAL(18,4)，因此客户档案中的合法四位小数比例
+        // 在此**原样**带入；随后的 Revalidate（SalesOrderAmountRules.ValidateNewWrite）按声明列
+        // db_owner.SalesOrders.CommissionRatio DECIMAL(18,4) 逐位原样复核 —— 无法原样存储的比例受控拒绝，
+        // 绝不静默取整（ERP-536）。
         order.CommissionRatio = customer.CommissionRatio is >= 0m and <= 100m ? customer.CommissionRatio : 0m;
     }
 
@@ -372,6 +376,8 @@ public static class SalesOrderConversion
     /// 服务端复核带入结果（ERP-422）：逐行金额按唯一权威口径重算，并复用
     /// <see cref="SalesOrderAmountRules.ValidateNewWrite"/> 校验「明细非空、数量 / 单价 / 币种 / 汇率 /
     /// 定金 / 佣金比例与金额精度」——与页面手工录入**完全同一套**服务端规则，绝不出现第二套校验。
+    /// ERP-536：佣金比例按声明列 <c>DECIMAL(18,4)</c> 逐位原样复核（客户档案带入的四位小数比例原样保留，
+    /// 无法原样存储的比例受控拒绝而非取整）。
     /// 合计与定金金额随后由 <see cref="SalesOrderController.Calculate"/> 计算。
     /// </summary>
     private static void Revalidate(SalesOrder order)

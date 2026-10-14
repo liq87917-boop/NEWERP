@@ -374,7 +374,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             // ERP-421：无论手工 / 历史 / 已解析来源，表头与明细都在同一原子事务内写入。
             transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
 
-            // ERP-422：新写入条款校验先于单号预约与任何字段 / 明细改写；失败整体回滚、不占用单号、不落任何数据。
+            // ERP-422 / ERP-536：新写入条款校验（含佣金比例按声明列 DECIMAL(18,4) 的逐位原样判定）先于
+            // 单号预约与任何字段 / 明细改写；失败整体回滚、不占用单号、不落任何数据。
             SalesOrderMutationRules.EnsureValidatedTerms(entity);
 
             var lineage = new SalesOrderSourceLineage();
@@ -471,7 +472,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             // ERP-421：无论手工 / 历史 / 已解析来源，修改都在同一原子事务内先取确定性行锁。
             transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
 
-            // ERP-422：新写入条款校验先于来源加锁与任何字段 / 明细改写；失败整体回滚、不留半成品变更。
+            // ERP-422 / ERP-536：新写入条款校验（含佣金比例按声明列 DECIMAL(18,4) 的逐位原样判定）先于
+            // 来源加锁与任何字段 / 明细改写；失败整体回滚、不留半成品变更。
             SalesOrderMutationRules.EnsureValidatedTerms(entity);
 
             var preliminaryRead = await Db.SalesOrders.AsNoTracking()
@@ -1082,8 +1084,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     public static void Calculate(SalesOrder entity) => SalesOrderAmountRules.Calculate(entity);
 
     /// <summary>
-    /// 业务字段校验（佣金比例 0~100；历史单据不填时为 0，不受影响）。
-    /// 实现位于 <see cref="SalesOrderAmountRules.Validate"/>，与合计算法同源。
+    /// 业务字段校验（佣金比例 0~100 且最多 4 位小数；历史单据不填时为 0，不受影响）。
+    /// 实现位于 <see cref="SalesOrderAmountRules.Validate"/>，与合计算法同源；ERP-536：佣金比例列声明为
+    /// <c>DECIMAL(18,4)</c>，无法逐位原样存储的比例一律受控拒绝，绝不静默取整。
     /// </summary>
     public static void Validate(SalesOrder entity) => SalesOrderAmountRules.Validate(entity);
 }

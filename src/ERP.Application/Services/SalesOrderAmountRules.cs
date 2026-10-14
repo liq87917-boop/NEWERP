@@ -11,7 +11,8 @@ namespace ERP.Application.Services;
 /// <item>明细金额：<c>金额 = 数量 × 单价</c>（逐行，服务端重算，不信任客户端金额）；</item>
 /// <item>订单总额：<c>总额 = Σ 明细数量 × 单价</c>；</item>
 /// <item>定金金额：<c>定金金额 = 总额 × 定金比例 %</c>；</item>
-/// <item>业务校验：佣金比例必须在 0~100 之间（历史单据不填时为 0，不受影响）。</item>
+/// <item>业务校验：佣金比例必须在 0~100 之间且最多 4 位小数（<c>DECIMAL(18,4)</c>，与声明列同源，
+/// ERP-536：无法原样存储的比例一律拒绝，绝不静默取整；历史单据不填时为 0，不受影响）。</item>
 /// </list>
 /// <para>边界：本类只做**纯计算与校验**，不访问数据库、不写库、不改变单据状态，也不涉及库存 /
 /// 出运 / 财务口径。金额保留原始精度（不按币种取整），与销售订单既有页面录入路径完全一致。</para>
@@ -36,15 +37,33 @@ public static class SalesOrderAmountRules
     public const decimal MaxCommissionRatio = 100m;
 
     /// <summary>
-    /// EF / 数据库实际精度：<c>DECIMAL(18,2)</c>。
-    /// <para>销售订单主表与明细（<c>SalesOrders</c> / <c>SalesOrderDetails</c>）在 EF 模型中**未**显式
-    /// <c>HasPrecision</c>，因此数量 / 单价 / 行金额 / 合计 / 定金 / 汇率 / 比例一律按 EF 默认的
-    /// <c>DECIMAL(18,2)</c> 落库。校验必须使用**同一份**精度口径，否则正数量会被舍入为 0、或写入与明细
-    /// 合计不一致的金额。</para>
+    /// 佣金比例列（<c>db_owner.SalesOrders.CommissionRatio</c>）的实际小数位：<c>DECIMAL(18,4)</c>
+    /// （EF 模型已显式 <c>HasPrecision(18, 4)</c>，与 SchemaUpgrader 第 22 段声明同源，ERP-536）。
+    /// <para>这是<b>唯一</b>按四位小数存储的销售订单小数列；其余数量 / 单价 / 行金额 / 合计 / 定金 / 汇率 /
+    /// 定金比例列仍按 <see cref="DecimalScale"/>（<c>DECIMAL(18,2)</c>）映射，口径不变。</para>
+    /// </summary>
+    public const int CommissionRatioScale = 4;
+
+    /// <summary>
+    /// 佣金比例无法在四小数位列内**逐位原样**存储（第 5 位小数或量级溢出）时的拒绝文案
+    /// （既有受控参数错误 <see cref="ErrorCodes.InvalidParameter"/>，绝不静默取整）。
+    /// </summary>
+    public const string CommissionRatioScaleText =
+        "佣金比例必须在 0~100 之间且最多 4 位小数（DECIMAL(18,4)）：无法原样存储的比例一律拒绝，绝不静默取整";
+
+    /// <summary>
+    /// 销售订单**其余**小数列（数量 / 单价 / 行金额 / 合计 / 定金 / 汇率 / 定金比例）的实际精度：
+    /// <c>DECIMAL(18,2)</c>。
+    /// <para>这些列在 EF 模型中**未**显式 <c>HasPrecision</c>，因此按 EF 默认的 <c>DECIMAL(18,2)</c> 落库
+    /// （唯一例外是佣金比例列 <c>db_owner.SalesOrders.CommissionRatio</c>，见 <see cref="CommissionRatioScale"/>，
+    /// ERP-536）。校验必须使用**同一份**精度口径，否则正数量会被舍入为 0、或写入与明细合计不一致的金额。</para>
     /// </summary>
     public const int DecimalPrecision = 18;
 
-    /// <summary>EF / 数据库实际小数位：2（与 <see cref="DecimalPrecision"/> 同源）。</summary>
+    /// <summary>
+    /// 销售订单其余小数列的实际小数位：2（与 <see cref="DecimalPrecision"/> 同源）；
+    /// 佣金比例列的小数位见 <see cref="CommissionRatioScale"/>（<c>DECIMAL(18,4)</c>）。
+    /// </summary>
     public const int DecimalScale = 2;
 
     /// <summary><c>DECIMAL(18,2)</c> 的最大可表示值（16 位整数 + 2 位小数）。</summary>
@@ -88,6 +107,33 @@ public static class SalesOrderAmountRules
         }
     }
 
+    /// <summary>
+    /// 佣金比例能否在 <c>db_owner.SalesOrders.CommissionRatio</c>（<c>DECIMAL(18,4)</c>）列内
+    /// <b>逐位原样</b>存储（ERP-536）：落在既有 0~100 政策区间（含端点）且**不超过 4 位小数**。
+    /// <para>纯判定：绝不取整 / 截断 / 夹取入参。<c>0</c> / <c>100</c> / <c>0.1250</c> / <c>12.3456</c> 放行；
+    /// <c>0.12505</c>（第 5 位小数）、<c>99.99995</c>（半进位取整后恰好落到上限）、量级溢出与
+    /// <c>101</c> / <c>-1</c>（超出 0~100 政策）一律 <c>false</c>。</para>
+    /// </summary>
+    public static bool IsCommissionRatioRepresentable(decimal value)
+        => value >= MinCommissionRatio && value <= MaxCommissionRatio
+           && decimal.Round(value, CommissionRatioScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 佣金比例校验（销售订单**唯一权威**口径，ERP-536）：既要落在既有 0~100 政策区间（含端点），
+    /// 又要能在声明为 <c>DECIMAL(18,4)</c> 的列内逐位原样存储；任一项不满足即返回既有受控业务错误
+    /// （<see cref="ErrorCodes.InvalidParameter"/>），**绝不**把 <c>12.34567</c> 静默取整为 <c>12.35</c> 落库。
+    /// <para>本方法只校验，不改写任何字段，也不访问数据库。</para>
+    /// </summary>
+    public static void ValidateCommissionRatio(decimal commissionRatio)
+    {
+        if (commissionRatio < MinCommissionRatio || commissionRatio > MaxCommissionRatio)
+            throw BusinessException.InvalidParameter(
+                $"佣金比例必须在 {MinCommissionRatio:0}~{MaxCommissionRatio:0} 之间");
+
+        if (!IsCommissionRatioRepresentable(commissionRatio))
+            throw BusinessException.InvalidParameter(CommissionRatioScaleText);
+    }
+
     /// <summary>明细金额口径：逐行 <c>金额 = 数量 × 单价</c>（服务端重算，忽略客户端传入的金额）</summary>
     public static void ApplyDetailAmounts(SalesOrder order)
     {
@@ -106,14 +152,16 @@ public static class SalesOrderAmountRules
         order.DepositAmount = order.TotalAmount * order.DepositRatio / 100;
     }
 
-    /// <summary>业务字段校验（佣金比例 0~100；历史单据不填时为 0，不受影响）</summary>
+    /// <summary>
+    /// 业务字段校验（佣金比例 0~100 且最多 4 位小数；历史单据不填时为 0，不受影响）。
+    /// <para>ERP-536：佣金比例列声明为 <c>DECIMAL(18,4)</c>，无法逐位原样存储的比例（第 5 位小数 /
+    /// 量级溢出）在此受控拒绝，**绝不**静默取整；本方法只校验，不改写任何字段。</para>
+    /// </summary>
     public static void Validate(SalesOrder order)
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.CommissionRatio < MinCommissionRatio || order.CommissionRatio > MaxCommissionRatio)
-            throw BusinessException.InvalidParameter(
-                $"佣金比例必须在 {MinCommissionRatio:0}~{MaxCommissionRatio:0} 之间");
+        ValidateCommissionRatio(order.CommissionRatio);
     }
 
     /// <summary>定金比例校验（0~100；用于「带入预填 / 变更申请」这类需要显式复核比例的服务端路径）</summary>
@@ -156,7 +204,8 @@ public static class SalesOrderAmountRules
     /// <item>逐行单价 ≥ 0 且可在实际 EF 精度内表示（保留既有「零单价」政策）；</item>
     /// <item>币种是 <see cref="Currency"/> 已定义值（不跨币种合计）；</item>
     /// <item>汇率 &gt; 0 且可在实际 EF 精度内表示；</item>
-    /// <item>定金比例与佣金比例均在 0~100（含端点）；</item>
+    /// <item>定金比例与佣金比例均在 0~100（含端点），且佣金比例不得超过 4 位小数
+    /// （<c>db_owner.SalesOrders.CommissionRatio</c> 声明为 <c>DECIMAL(18,4)</c>，ERP-536）；</item>
     /// <item>逐行「数量 × 单价」、总额与定金金额均可在实际 EF 精度内表示，且全程 checked：
     /// 溢出 / 不可表示一律返回受控业务错误（<see cref="ErrorCodes.InvalidParameter"/>），
     /// 绝不静默取整、绝不写入与明细合计不一致的金额。</item>

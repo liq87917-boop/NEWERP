@@ -161,6 +161,61 @@ public class SalesOrderControllerTests
         Assert.Single(db.SalesOrderDetails, d => d.SalesOrderId == so.Id);
     }
 
+    [Fact]
+    public async Task Update_佣金比例五位小数_受控拒绝且既有行不变()
+    {
+        using var db = TestDbFactory.Create();
+        var (so, _) = SeedSalesOrder(db, "SO-CR5", DocumentStatus.Pending);
+        SeedMasterFixtures(db);
+        var ctl = BuildController(db);
+
+        var update = new SalesOrder
+        {
+            OrderDate = DateTime.Today,
+            CustomerId = 1, SalesmanId = 1, Currency = (Currency)2, ExchangeRate = 7.1m,
+            DepositRatio = 30m,
+            CommissionRatio = 12.34567m,
+            Details = new List<SalesOrderDetail>
+            {
+                new SalesOrderDetail { ProductId = 1, ProductName = "P1", Quantity = 10m, UnitPrice = 100m }
+            }
+        };
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Update(so.Id, update));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(SalesOrderAmountRules.CommissionRatioScaleText, ex.Message);
+        Assert.Equal(0m, db.SalesOrders.Single(o => o.Id == so.Id).CommissionRatio);
+    }
+
+    [Fact]
+    public async Task Update_佣金比例四位小数_按声明精度原样落库()
+    {
+        using var db = TestDbFactory.Create();
+        var (so, _) = SeedSalesOrder(db, "SO-CR4", DocumentStatus.Pending);
+        SeedMasterFixtures(db);
+        var ctl = BuildController(db);
+
+        var update = new SalesOrder
+        {
+            OrderDate = DateTime.Today,
+            CustomerId = 1, SalesmanId = 1, Currency = (Currency)2, ExchangeRate = 7.1m,
+            DepositRatio = 30m,
+            CommissionRatio = 0.1250m,
+            Details = new List<SalesOrderDetail>
+            {
+                new SalesOrderDetail { ProductId = 1, ProductName = "P1", Quantity = 10m, UnitPrice = 100m }
+            }
+        };
+
+        Assert.IsType<OkObjectResult>(await ctl.Update(so.Id, update));
+
+        var dbSo = db.SalesOrders.Single(o => o.Id == so.Id);
+        Assert.Equal(0.1250m, dbSo.CommissionRatio);
+        Assert.Equal(1000m, dbSo.TotalAmount);
+        Assert.Equal(300m, dbSo.DepositAmount);
+    }
+
     // ==================== DocumentControllerBase 状态流转 ====================
 
     [Fact]
