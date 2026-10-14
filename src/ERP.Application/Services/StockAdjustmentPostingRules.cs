@@ -22,6 +22,12 @@ namespace ERP.Application.Services;
 /// 在实际存储精度（<c>DECIMAL(18,4)</c> / <c>DECIMAL(18,6)</c>）内可表示，并用与
 /// <c>StockAdjustmentController.Normalize</c> 同源的 <see cref="ComputeSignedDifference"/> 复核有符号差异数量 / 金额
 /// 与表头合计（含乘法 / 求和溢出）；精度常量与 <c>ErpDbContext</c> 的 <c>HasPrecision</c> 声明同源。</para>
+/// <para>ERP-526 补齐<b>单位完整性护栏</b>：盘点流程<b>全程按商品基础单位计量</b>（账面 / 实盘数量、成本与差异都按基础单位口径），
+/// 且<b>不实现任何包装折算</b>。因此显式提供的非空明细单位（去首尾空白、大小写不敏感）必须等于商品当前基础单位，
+/// 否则在单号预约、明细整体替换与任何落库之前受控拒绝（<see cref="IsBaseUnitEligible"/> /
+/// <see cref="EnsureStoredBaseUnitsEligibleAsync"/>）；空 / 空白单位保持既有回退（审核时按商品基础单位落库展示），
+/// 商品未维护基础单位时对显式非空单位同样受控拒绝。护栏只做「放行 / 拒绝」：<b>绝不</b>改写账面 / 实盘数量、成本或差异，
+/// 也绝不把装箱 / 任意单位按基础单位记账。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>，不改单据、不改库存 / 流水、不改任何估值规则；
 /// 「判定 + 状态变更 + 库存写入」的原子性由调用方（<c>StockAdjustmentController</c>）在同一可串行化事务内完成。</para>
 /// </summary>
@@ -43,6 +49,9 @@ public static class StockAdjustmentPostingRules
         "审核先取得盘点单行锁（UPDLOCK/HOLDLOCK），再在锁内重读权威状态与有效流水，校验明细（非负数量、非负成本、商品不重复、仓库与商品在用），" +
         "随后按确定性顺序（仓库 Id 升序 → 商品 Id 升序）锁定受影响库存行，并把「已验证的账面数量基线（必须等于权威当前库存）」与全部差异调整、" +
         "库存流水、单据状态包在同一个可串行化事务内，恰好一次；账面数量与权威库存不一致（基线过期）时拒绝过账并要求在待提交状态重新盘点 / 修改；" +
+        "明细单位（去首尾空白、大小写不敏感）显式非空时必须等于商品当前基础单位：盘点流程全程按基础单位计量、不做任何包装折算，" +
+        "绝不把装箱 / 任意单位按基础单位记账，也绝不改写账面 / 实盘数量或成本；空 / 空白单位保持既有回退，商品未维护基础单位时显式非空单位一律拒绝；" +
+        "提交 / 审核在既有单据 / 库存锁内用当前商品快照复核仍然生效的已存明细单位；" +
         "销审按既有红字流水冲销，已被后续业务占用时拒绝且余额 / 流水 / 状态全部不变；并发审核 / 审核或审核 / 取消因共用同一把单据行锁而只能成功其一。";
 
     /// <summary>模块边界文案（不改估值口径、不改主数据、不删历史证据）</summary>
@@ -102,6 +111,20 @@ public static class StockAdjustmentPostingRules
         "成本单价非负且在 DECIMAL(18,6) 内可表示，有符号差异数量（实盘 − 账面）与差异金额（差异数量 × 成本单价）及其表头合计（差异总数量 / 差异总金额）" +
         "必须落在实际存储精度内（含乘法与求和溢出）；商品 Id 必须有效且同一商品不得重复，仓库与商品必须存在、未删除、已启用；" +
         "空草稿头（0 行明细）仍受支持，被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水 / 状态变化。";
+
+    /// <summary>
+    /// ERP-526 盘点单位资格口径文案（接口 / 文档 / 测试同源）：盘点流程<b>全程按商品基础单位</b>计量金额与数量，
+    /// 显式提供的非空明细单位（去首尾空白、大小写不敏感）必须等于商品当前基础单位；等于基础单位直接放行（原样保留口径），
+    /// 空 / 空白单位保持既有回退（审核时按商品基础单位落库展示），其他任意显式非空单位（<b>包括商品自身的装箱单位</b>）
+    /// 一律在单号预约与任何落库之前受控拒绝 —— 盘点流程不做任何包装折算，绝不臆造新单位、绝不猜测单位换算、
+    /// 绝不改写账面 / 实盘数量或成本；商品未维护基础单位时对显式非空单位同样受控拒绝。
+    /// </summary>
+    public const string BaseUnitEligibilityRuleText =
+        "库存盘点单明细显式提供的非空单位（去首尾空白、大小写不敏感）必须等于商品当前基础单位：" +
+        "等于基础单位直接放行（数量 / 成本 / 差异口径不变）；空 / 空白单位保持既有回退（审核时按商品基础单位落库展示）；" +
+        "其他任意显式非空单位（包括商品自身的装箱单位）一律在单号预约与任何落库之前受控拒绝 —— " +
+        "盘点流程全程按基础单位计量、不做任何包装折算，绝不把任意单位按基础单位记账、绝不猜测单位换算、绝不改写账面 / 实盘数量或成本；" +
+        "商品未维护基础单位时对显式非空单位同样受控拒绝（绝不臆造新单位）。";
 
     /// <summary>
     /// 有符号差异数量与差异金额的**唯一**计算口径（与 <c>StockAdjustmentController.Normalize</c> 同源）：
@@ -273,8 +296,82 @@ public static class StockAdjustmentPostingRules
                 throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 不存在或已删除，无法盘点");
             if (product.Status != 1)
                 throw BusinessException.RuleConflict($"商品 [{product.ProductName}] 已停用，禁止盘点调整（fail closed）");
+
+            // ERP-526：复用同一次商品读取复核明细单位的基础单位资格（先于单号预约 / 明细整体替换 / 任何落库）。
+            EnsureBaseUnitEligible(product, d.Unit);
         }
     }
+
+    /// <summary>
+    /// ERP-526 共享纯判定（无 IO）：盘点明细单位是否落在盘点可用的<b>基础单位</b>口径内。
+    /// <para>空 / 空白单位 → 放行（既有回退，审核时按商品基础单位落库展示）；去首尾空白后与商品基础单位
+    /// 大小写不敏感相等 → 放行；其余任何显式非空单位（<b>包括商品自身的装箱单位</b>）→ 拒绝：
+    /// 盘点流程不实现包装折算，绝不把任意单位按基础单位记账、绝不猜测单位换算。</para>
+    /// <para>商品未维护基础单位（空 / 空白）时，显式非空单位一律拒绝（fail closed，绝不臆造新单位）。</para>
+    /// </summary>
+    public static bool IsBaseUnitEligible(string? lineUnit, string? baseUnit)
+    {
+        var unit = (lineUnit ?? string.Empty).Trim();
+        if (unit.Length == 0) return true;
+
+        var effectiveBase = (baseUnit ?? string.Empty).Trim();
+        return effectiveBase.Length > 0 && unit.Equals(effectiveBase, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// ERP-526 批量复核（纯判定，无 IO）：对已在用商品快照逐行校验明细单位资格，任一越界即整体受控拒绝。
+    /// 商品缺失 / 商品 Id 无效 / 已删除的行跳过（由既有在用主数据护栏负责）；只做只读判定，不改任何数量、成本或差异。
+    /// </summary>
+    public static void EnsureBaseUnitsEligible(IReadOnlyDictionary<long, BaseProduct> products,
+        IEnumerable<StockAdjustmentDetail> details)
+    {
+        ArgumentNullException.ThrowIfNull(products);
+        ArgumentNullException.ThrowIfNull(details);
+
+        foreach (var d in details.Where(d => !d.IsDeleted && d.ProductId is > 0))
+        {
+            if (!products.TryGetValue(d.ProductId!.Value, out var product)) continue;
+            EnsureBaseUnitEligible(product, d.Unit);
+        }
+    }
+
+    /// <summary>
+    /// ERP-526 提交 / 审核承诺边界复核（<b>一次有界只读查询</b>）：加载当前在用商品快照后复核<b>仍然生效</b>的
+    /// 已存明细单位资格；调用方仍须先取得既有单据 / 库存行锁。主数据被改写（基础单位变更 / 商品删除）或单位越界时
+    /// 受控拒绝，且不落库、不改单据 / 明细 / 状态 / 库存 / 流水 / 单号。
+    /// </summary>
+    public static async Task EnsureStoredBaseUnitsEligibleAsync(IErpDbContext db,
+        IEnumerable<StockAdjustmentDetail> details, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var rows = details.Where(d => !d.IsDeleted && d.ProductId is > 0).ToList();
+        if (rows.Count == 0) return;
+
+        var ids = rows.Select(d => d.ProductId!.Value).Distinct().ToList();
+        var products = await db.BaseProducts.AsNoTracking()
+            .Where(p => ids.Contains(p.Id) && !p.IsDeleted)
+            .ToDictionaryAsync(p => p.Id, ct);
+        EnsureBaseUnitsEligible(products, rows);
+    }
+
+    /// <summary>
+    /// ERP-526 受控拒绝（<c>RuleConflict</c>）：显式非空单位不是商品当前基础单位（主数据未维护基础单位时同样拒绝），
+    /// 绝不臆造单位 / 换算，绝不改写账面 / 实盘数量或成本。
+    /// </summary>
+    private static void EnsureBaseUnitEligible(BaseProduct product, string? lineUnit)
+    {
+        if (IsBaseUnitEligible(lineUnit, product.Unit)) return;
+
+        throw BusinessException.RuleConflict(
+            $"商品 [{product.ProductName}] 的明细单位 [{(lineUnit ?? string.Empty).Trim()}] 不是当前基础单位 " +
+            $"[{UnitDisplay(product.Unit)}]：库存盘点按基础单位计量、流程内不做任何包装折算，已拒绝" +
+            "（绝不把任意单位按基础单位记账、绝不猜测单位换算、绝不改写账面 / 实盘数量或成本）");
+    }
+
+    private static string UnitDisplay(string? unit)
+        => string.IsNullOrWhiteSpace(unit) ? "未设置" : unit.Trim();
 
     /// <summary>账面数量是否已过期：只要与权威当前库存不一致即视为过期（含账面为正但库存行不存在的情形）。</summary>
     public static bool IsStaleBookQuantity(decimal bookQuantity, decimal currentQuantity)

@@ -24,6 +24,10 @@ namespace ERP.Api.Controllers;
 ///    （账面 / 实盘数量、成本单价非负且在实际存储精度 DECIMAL(18,4) / DECIMAL(18,6) 内可表示，有符号差异
 ///    数量 / 金额与表头合计可表示、含乘法与求和溢出）；服务端把每一行都强制为「正常」行，
 ///    客户端 <c>IsDeleted</c> 绝不可能隐藏坏行；提交 / 审核在既有锁内复核当前生效的已存值。
+/// 7) ERP-526 单位完整性：明细单位显式非空时（去首尾空白、大小写不敏感）必须是商品当前<b>基础单位</b>
+///    （盘点全程按基础单位计量、不做任何包装折算；装箱 / 任意单位一律受控拒绝）；创建 / 修改在单号预约与明细
+///    整体替换之前拒绝，提交 / 审核在既有单据 / 库存锁内用当前商品快照复核仍然生效的已存明细单位；
+///    护栏只放行 / 拒绝，绝不改写账面 / 实盘数量、成本或差异。空 / 空白单位保持既有回退。
 /// </summary>
 [Route("api/inventory/stock-adjustments")]
 public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
@@ -159,6 +163,8 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
 
         // ERP-507：服务端权威覆盖明细身份 / 删除态（客户端 IsDeleted 不能隐藏坏行），再在单号预约与任何写入之前
         // 校验数值边界（非负且可表示的账面 / 实盘数量与成本、有符号差异数量 / 金额与表头合计）。
+        // ERP-526：同一份在用商品快照内复核明细单位的基础单位资格（显式非空单位必须等于商品当前基础单位，
+        // 装箱 / 任意单位一律拒绝 —— 盘点流程不做任何包装折算，账面 / 实盘数量与成本原样保留）。
         ApplyServerOwnedDetailIdentity(entity.Details);
         StockAdjustmentPostingRules.EnsureLineShape(entity.Details);
         await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, entity.Details);
@@ -198,6 +204,7 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
 
             // ERP-507：先强制每一行为「正常」行（客户端 IsDeleted 不能隐藏坏行），再在改写已跟踪表头 / 明细之前
             // 校验数值边界（非负且可表示的账面 / 实盘数量与成本、有符号差异数量 / 金额与表头合计）。
+            // ERP-526：单位资格同样在明细整体替换之前收敛（显式非空单位必须等于商品当前基础单位）。
             ApplyServerOwnedDetailIdentity(entity.Details);
             StockAdjustmentPostingRules.EnsureLineShape(entity.Details);
             await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, entity.Details);
@@ -265,6 +272,11 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
 
             // 确定性顺序锁定受影响库存行，再核验账面基线（账面数量必须等于权威当前库存）
             await LockAdjustmentStocksAsync(entity.WarehouseId, details);
+
+            // ERP-526：库存锁内、任何状态 / 流水写入之前，用当前商品快照复核仍然生效的已存明细单位资格。
+            // 越界（如主数据基础单位被改写、历史草稿携带 CTN / KG）即整体回滚：单据 / 明细 / 状态 / 库存 / 流水全部不变。
+            await StockAdjustmentPostingRules.EnsureStoredBaseUnitsEligibleAsync(Db, details);
+
             foreach (var d in details)
             {
                 var current = await _inventory.GetCurrentQuantityAsync(entity.WarehouseId, d.ProductId!.Value);
@@ -400,6 +412,8 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
             var details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
             StockAdjustmentPostingRules.EnsureLineShape(details);
             await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, details);
+            // ERP-526：单据行锁内复核**已经落库**的明细单位资格（用当前商品快照）：越界即拒绝且状态 / 库存 / 流水全部不变。
+            await StockAdjustmentPostingRules.EnsureStoredBaseUnitsEligibleAsync(Db, details);
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
