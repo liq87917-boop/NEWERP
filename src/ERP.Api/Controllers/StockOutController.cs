@@ -36,6 +36,13 @@ namespace ERP.Api.Controllers;
 /// 商品必须存在 / 未删除 / 启用；空草稿头仍可保存，提交 / 审核要求至少一行有效明细，重复商品行按累计数量语义保留。
 /// 该护栏是<b>纯判定 + 有界只读查询</b>，不新增表 / 列 / 索引 / 菜单 / 权限，也不改动既有行锁、可串行化事务、
 /// ERP-343 累计容量口径与 <see cref="StockMovement"/> 流水写入。</para>
+/// <para>ERP-523：新增 / 修改在单位资格成立之后才折算/落库 —— 显式提供的非空明细单位必须落在
+/// <see cref="StockUnitConversion.IsUnitEligible"/> 认定的商品当前基础 / 装箱单位内，否则在单号预约与
+/// 任何表头 / 明细 / 来源 / 状态写入之前受控拒绝；提交 / 审核在既有单据 / 来源锁内用当前商品快照复核
+/// 仍然生效明细的单位资格（<see cref="StockUnitConversion.EnsureUnitsEligibleAsync(IErpDbContext, IEnumerable{StockOutDetail}, CancellationToken)"/>），
+/// 被拒绝时零单据 / 明细 / 来源 / 状态 / 库存 / 流水 / 单号变化。空 / 空白单位保持既有回退，装箱单位按
+/// 当前正数 <c>UnitsPerPackage</c> <b>恰好折算一次</b>且不会在承诺边界重复折算；不改变采购入库策略，
+/// 不新增权限 / 表 / 列 / 菜单，也不改写历史单位。</para>
 /// </summary>
 [Route("api/stock-outs")]
 public class StockOutController : DocumentControllerBase<StockOut>
@@ -155,7 +162,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
 
         // ERP-370：授权与客户范围校验先于单号生成——被拒绝方绝不消耗单据号，也绝不落任何明细。
         await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
-        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        // ERP-523：单位资格闸门与装箱折算复用同一次批量商品读取 —— 显式非空的越界单位在单号预约与
+        // 任何表头 / 明细 / 来源 / 状态写入之前受控拒绝；空单位保持既有回退，装箱折算恰好一次。
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details, ensureUnitEligible: true);
         Calculate(entity);
         await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
         // ERP-502：草稿护栏（形状 + 实际存储精度 + 在用仓库 / 商品）在单位折算与来源校验之后、
@@ -220,7 +229,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
             // 单据号 / 状态 / 删除态由服务端保持（客户端提交值不参与持久化）。
             entity.Id = 0;
             ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
-            await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+            // ERP-523：与创建同一口径 —— 需要落库的明细单位在明细整体替换之前完成资格判定 + 装箱折算（恰好一次）。
+            await StockUnitConversion.NormalizeAsync(Db, entity.Details, ensureUnitEligible: true);
             await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
             // ERP-502：与创建同一草稿护栏，在明细整体替换 / 任何写入之前收敛非法仓库、非法数量与失效商品，
             // 被拒绝方不消耗新单号、不改动既有单据与明细逐字段。
@@ -286,6 +296,10 @@ public class StockOutController : DocumentControllerBase<StockOut>
             // 幂等护栏放进锁内：同单并发审核时，后到者在拿到锁后能看到先到者已产生的流水，从而被拒绝。
             if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockOutType, entity.Id) > 0)
                 throw BusinessException.RuleConflict("该出库单已产生库存流水，不能重复审核");
+
+            // ERP-523：在既有单据 / 来源锁内复核仍然生效明细的单位资格（当前商品快照）；越界即整体回滚，
+            // 状态 / 库存 / 流水 / 单号 / 来源容量全部保持原样。
+            await StockUnitConversion.EnsureUnitsEligibleAsync(Db, entity.Details.Where(d => !d.IsDeleted));
 
             await StockOutOrderFulfillmentRules.ValidateApprovalAsync(Db, entity);
 
@@ -444,6 +458,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
             await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
             // ERP-502：提交要求至少一行有效明细（空草稿头可保存但不可提交 / 审核）。
             StockOutAuthorizationRules.EnsureHasEffectiveLine(entity.Details, "提交");
+            // ERP-523：承诺边界复核仍然生效的已存明细单位资格（当前在用商品实时快照；空单位保持既有回退）。
+            await StockUnitConversion.EnsureUnitsEligibleAsync(Db, entity.Details.Where(d => !d.IsDeleted));
 
             var result = await base.Submit(id);
             await transaction.CommitAsync();
