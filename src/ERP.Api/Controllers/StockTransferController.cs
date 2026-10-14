@@ -19,6 +19,9 @@ namespace ERP.Api.Controllers;
 /// 5) 审核 / 销审 / 取消 / 删除共用同一把调拨单行锁（UPDLOCK/HOLDLOCK），并把两侧仓库、全部明细成本、
 ///    库存流水与单据状态包在同一可串行化事务内（恰好一次）；两侧库存行按确定性顺序
 ///    （仓库 Id 升序 → 商品 Id 升序）加锁，对向调拨不互相死锁。
+/// 6) ERP-525：明细单位必须落在商品当前基础单位口径内（显式非空单位 ≠ 商品基础单位一律受控拒绝，
+///    调拨流程不做任何包装折算、不改写数量 / 成本）；创建 / 修改在单号预约与明细整体替换之前拒绝，
+///    提交 / 审核在既有单据 / 库存锁内复核仍然生效的已存明细单位。
 /// </summary>
 [Route("api/inventory/stock-transfers")]
 public class StockTransferController : DocumentControllerBase<StockTransfer>
@@ -155,6 +158,8 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
 
         // ERP-501：明细形状（正数量 / 非负成本 / 实际存储精度可表示）与在用主数据（两侧仓库与商品）
         // 先于单号预约与任何单据 / 明细写入；被拒绝方不消耗单据号、不落任何行。
+        // ERP-525：同一份在用商品快照内复核明细单位的基础单位资格（显式非空单位必须等于商品当前基础单位，
+        // 装箱 / 任意单位一律拒绝 —— 调拨流程不做任何包装折算，数量与成本原样保留）。
         StockTransferPostingRules.EnsureLineShape(entity.Details);
         await StockTransferPostingRules.EnsureLiveMasterDataAsync(
             Db, entity.FromWarehouseId, entity.ToWarehouseId, entity.Details);
@@ -190,6 +195,7 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
 
             // ERP-501：明细整体替换之前的同一套草稿护栏（形状 + 可表示性 + 在用主数据）；
             // 校验先于任何删除 / 写入，被拒绝方不改动既有单据与明细、不消耗单据号。
+            // ERP-525：单位资格同样在明细整体替换之前收敛（显式非空单位必须等于商品当前基础单位）。
             entity.Details ??= new List<StockTransferDetail>();
             StockTransferPostingRules.EnsureLineShape(entity.Details);
             await StockTransferPostingRules.EnsureLiveMasterDataAsync(
@@ -229,6 +235,9 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
     /// 审核：调出仓扣减、调入仓增加（同一成本单价），总量守恒恰好一次。
     /// <para>先取本单行锁（UPDLOCK/HOLDLOCK）+ 可串行化事务，再在锁内重读权威状态与有效流水，
     /// 随后把两侧仓库、全部明细成本、库存流水与状态一起提交 / 回滚；任一步失败整体回滚。</para>
+    /// <para>ERP-525：两侧库存行加锁之后、任何状态 / 流水写入之前，用当前商品快照复核已存明细单位
+    /// （显式非空单位必须等于商品当前基础单位；空单位保持既有回退，审核时按商品基础单位落库展示）；
+    /// 越界即整体回滚，绝不把 CTN / KG 之类单位按基础单位记账，也不改写数量 / 成本。</para>
     /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
@@ -264,6 +273,10 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
 
             // 4) 调出 / 调入两侧库存行按确定性顺序加锁：对向调拨（A→B 与 B→A）不会形成环形等待
             await LockTransferStocksAsync(entity, details);
+
+            // 4.1) ERP-525：库存锁内、任何状态 / 流水写入之前，用当前商品快照复核已存明细单位仍然落在基础单位口径内。
+            //      越界（如主数据基础单位被改写、历史草稿携带 CTN / KG）即整体回滚：单据 / 明细 / 状态 / 库存 / 流水全部不变。
+            await StockTransferPostingRules.EnsureStoredBaseUnitsEligibleAsync(Db, details);
 
             decimal totalQuantity = 0, totalAmount = 0;
             foreach (var d in details)
@@ -390,6 +403,8 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
     /// 提交（仅待提交可提交；与审核 / 取消 / 删除共用同一把单据行锁）
     /// <para>ERP-501：提交要求至少一行有效明细，且明细形状 / 可表示性与在用主数据有效；空草稿头仍可保存，
     /// 但不得提交，须先补齐有效明细。</para>
+    /// <para>ERP-525：在同一可串行化事务与单据行锁内复核已经落库的明细单位资格（用当前商品快照），
+    /// 越界即拒绝且状态 / 库存 / 流水 / 单号全部不变。</para>
     /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
@@ -407,13 +422,15 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
             if (GetStatus(entity) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
 
-            // ERP-501：提交前要求至少一行有效明细，并复核明细形状 / 可表示性与在用主数据（先于任何写入）
+            // ERP-501：提交前要求至少一行有效明细，并复核明细形状 / 可表示性与在用主数据（先于任何写入）；
+            // ERP-525：同一份在用商品快照内复核仍然生效的已存明细单位资格（锁内、先于状态流转）。
             var details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
             if (details.Count == 0)
                 throw BusinessException.RuleConflict("调拨单无明细，不能提交");
             StockTransferPostingRules.EnsureLineShape(details);
             await StockTransferPostingRules.EnsureLiveMasterDataAsync(
                 Db, entity.FromWarehouseId, entity.ToWarehouseId, details);
+            await StockTransferPostingRules.EnsureStoredBaseUnitsEligibleAsync(Db, details);
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();

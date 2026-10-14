@@ -19,6 +19,13 @@ namespace ERP.Application.Services;
 /// 提交与审核要求至少一行有效明细；任一不满足即按既有受控业务错误（<c>InvalidParameter</c> / <c>RuleConflict</c>）
 /// 拒绝，绝不消耗单据号、绝不落任何单据 / 明细 / 库存行。空草稿头（0 行明细）与重复商品行仍受支持，
 /// 不引入任何任意唯一性规则。</para>
+/// <para>ERP-525 新增<b>基础单位资格护栏</b>（<see cref="IsBaseUnitEligible"/> + <see cref="EnsureBaseUnitsEligible"/> +
+/// <see cref="EnsureStoredBaseUnitsEligibleAsync"/>，并接入 <see cref="EnsureLiveMasterDataAsync"/> 的同一次商品读取）：
+/// 仓库调拨流程<b>全程按商品基础单位计量</b>且<b>不实现任何包装折算</b>，因此显式提供的非空明细单位（去首尾空白、大小写不敏感）
+/// 必须恰好等于商品当前基础单位；装箱单位（<c>PackageUnit</c>）与任何任意单位一律在<b>单号预约 / 明细整体替换 / 落库之前</b>
+/// 受控拒绝，<b>绝不把数量或成本按任意单位记账、绝不猜测单位换算</b>（此前审核会用 <c>product.Unit</c> 静默覆盖明细单位，
+/// 使标注为 CTN / KG 的数量被当成基础单位记账）。空 / 空白单位保持既有回退（审核时按商品基础单位落库展示），
+/// 商品未维护基础单位时对显式非空单位同样受控拒绝；提交 / 审核在既有单据 / 库存锁内用当前商品快照复核仍然生效的已存单位资格。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>，不改单据、不改库存 / 流水、不改任何估值规则；
 /// 「判定 + 状态变更 + 库存写入」的原子性，以及 `UPDLOCK/HOLDLOCK` 单据行锁的实际获取，
 /// 由调用方（<c>StockTransferController</c>）在同一可串行化事务内完成。</para>
@@ -71,8 +78,8 @@ public static class StockTransferPostingRules
     /// <summary>过账护栏口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "仓库调拨单的创建 / 修改 / 提交 / 审核 / 销审 / 取消 / 删除都会重新校验当前身份（缺失 / 禁用 / 未映射一律 fail closed）与既有「库存查询」（stock-query）菜单授权；" +
-        "创建与修改在单号预约与明细整体替换之前校验明细形状（正数量、非负成本、行金额与合计在实际存储精度内可表示）与在用主数据（两侧仓库互异且存在 / 未删除 / 启用，商品存在 / 未删除 / 启用），" +
-        "被拒绝方绝不消耗单据号、不落任何单据 / 明细 / 库存行；提交与审核要求至少一行有效明细；" +
+        "创建与修改在单号预约与明细整体替换之前校验明细形状（正数量、非负成本、行金额与合计在实际存储精度内可表示）、在用主数据（两侧仓库互异且存在 / 未删除 / 启用，商品存在 / 未删除 / 启用）与明细单位的基础单位资格（显式非空单位必须等于商品当前基础单位；空 / 空白单位保持既有回退；调拨流程不实现任何包装折算），" +
+        "被拒绝方绝不消耗单据号、不落任何单据 / 明细 / 库存行；提交与审核要求至少一行有效明细，并在既有单据 / 库存锁内用当前商品快照复核仍然生效的已存明细单位资格；" +
         "审核先取得调拨单行锁（UPDLOCK/HOLDLOCK），再在锁内重读权威状态与有效流水，随后把「调出仓减少 + 调入仓增加（同一成本单价）、明细成本、库存流水与单据状态」" +
         "包在同一个可串行化事务内，恰好一次；销审按既有红字流水冲销，调入仓货物已被消耗时拒绝且两侧余额 / 流水 / 状态全部不变；" +
         "两侧仓库的库存行按确定性顺序（仓库 Id 升序 → 商品 Id 升序）加锁，对向调拨不互相死锁；" +
@@ -84,6 +91,17 @@ public static class StockTransferPostingRules
         "不改写商品、仓库主数据（草稿护栏只做只读主数据核验），不改写其它单据与历史库存流水，" +
         "不新增表 / 列 / 索引 / 权限 / 菜单，也不删除任何历史证据；" +
         "所有库存增减与冲销仍复用既有 InventoryService（ERP-009 / ERP-025）记账并写流水。";
+
+    /// <summary>
+    /// ERP-525 调拨明细单位资格口径文案（接口 / 文档 / 测试同源）：仓库调拨流程<b>全程按商品基础单位计量</b>
+    /// 且<b>不实现任何包装折算</b>，因此显式提供的非空明细单位必须恰好等于商品当前基础单位。
+    /// </summary>
+    public const string BaseUnitEligibilityRuleText =
+        "仓库调拨明细显式提供的非空单位（去首尾空白、大小写不敏感）必须恰好等于商品当前基础单位：" +
+        "等于基础单位则按基础单位记账，数量与成本原样保留；空 / 空白单位保持既有回退（审核时按商品基础单位落库展示）；" +
+        "装箱单位（PackageUnit）或任何其它显式非空单位一律在单号预约、明细整体替换与任何落库之前受控拒绝 —— " +
+        "调拨流程不实现包装折算，绝不把 CTN / KG 之类单位按基础单位记账、绝不猜测单位换算、绝不改写数量或成本；" +
+        "商品未维护基础单位时对显式非空单位同样受控拒绝；提交 / 审核在既有单据 / 库存锁内用当前商品快照复核仍然生效的已存单位资格。";
 
     /// <summary>
     /// 身份 / 账号状态 / 模块授权三重校验（fail closed）：缺失或非法身份按未认证拒绝，
@@ -221,8 +239,82 @@ public static class StockTransferPostingRules
                 throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 不存在或已删除，无法调拨");
             if (product.Status != 1)
                 throw BusinessException.RuleConflict($"商品 [{product.ProductName}] 已停用，禁止调拨（fail closed）");
+
+            // ERP-525：复用同一次商品读取复核明细单位的基础单位资格（先于单号预约 / 明细整体替换 / 任何落库）。
+            EnsureBaseUnitEligible(product, d.Unit);
         }
     }
+
+    /// <summary>
+    /// ERP-525 共享纯判定（无 IO）：明细单位是否落在调拨可用的<b>基础单位</b>口径内。
+    /// <para>空 / 空白单位 → 放行（既有回退，审核时按商品基础单位落库展示）；去首尾空白后与商品基础单位
+    /// 大小写不敏感相等 → 放行；其余任何显式非空单位（<b>包括商品自身的装箱单位</b>）→ 拒绝：
+    /// 调拨流程不实现包装折算，绝不把任意单位按基础单位记账、绝不猜测单位换算。</para>
+    /// <para>商品未维护基础单位（空 / 空白）时，显式非空单位一律拒绝（fail closed，绝不臆造新单位）。</para>
+    /// </summary>
+    public static bool IsBaseUnitEligible(string? lineUnit, string? baseUnit)
+    {
+        var unit = (lineUnit ?? string.Empty).Trim();
+        if (unit.Length == 0) return true;
+
+        var effectiveBase = (baseUnit ?? string.Empty).Trim();
+        return effectiveBase.Length > 0 && unit.Equals(effectiveBase, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// ERP-525 批量复核（纯判定，无 IO）：对已在用商品快照逐行校验明细单位资格，任一越界即整体受控拒绝。
+    /// 商品缺失 / 商品 Id 无效 / 已删除的行跳过（由既有在用主数据护栏负责）；只做只读判定，不改任何数量或成本。
+    /// </summary>
+    public static void EnsureBaseUnitsEligible(IReadOnlyDictionary<long, BaseProduct> products,
+        IEnumerable<StockTransferDetail> details)
+    {
+        ArgumentNullException.ThrowIfNull(products);
+        ArgumentNullException.ThrowIfNull(details);
+
+        foreach (var d in details.Where(d => !d.IsDeleted && d.ProductId is > 0))
+        {
+            if (!products.TryGetValue(d.ProductId!.Value, out var product)) continue;
+            EnsureBaseUnitEligible(product, d.Unit);
+        }
+    }
+
+    /// <summary>
+    /// ERP-525 提交 / 审核承诺边界复核（<b>一次有界只读查询</b>）：加载当前在用商品快照后复核<b>仍然生效</b>的
+    /// 已存明细单位资格；调用方仍须先取得既有单据 / 库存行锁。主数据被改写（基础单位变更 / 商品删除）或单位越界时
+    /// 受控拒绝，且不落库、不改单据 / 明细 / 状态 / 库存 / 流水 / 单号。
+    /// </summary>
+    public static async Task EnsureStoredBaseUnitsEligibleAsync(IErpDbContext db,
+        IEnumerable<StockTransferDetail> details, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var rows = details.Where(d => !d.IsDeleted && d.ProductId is > 0).ToList();
+        if (rows.Count == 0) return;
+
+        var ids = rows.Select(d => d.ProductId!.Value).Distinct().ToList();
+        var products = await db.BaseProducts.AsNoTracking()
+            .Where(p => ids.Contains(p.Id) && !p.IsDeleted)
+            .ToDictionaryAsync(p => p.Id, ct);
+        EnsureBaseUnitsEligible(products, rows);
+    }
+
+    /// <summary>
+    /// ERP-525 受控拒绝（<c>RuleConflict</c>）：显式非空单位不是商品当前基础单位（主数据未维护基础单位时同样拒绝），
+    /// 绝不臆造单位 / 换算，绝不改写数量或成本。
+    /// </summary>
+    private static void EnsureBaseUnitEligible(BaseProduct product, string? lineUnit)
+    {
+        if (IsBaseUnitEligible(lineUnit, product.Unit)) return;
+
+        throw BusinessException.RuleConflict(
+            $"商品 [{product.ProductName}] 的明细单位 [{(lineUnit ?? string.Empty).Trim()}] 不是当前基础单位 " +
+            $"[{UnitDisplay(product.Unit)}]：仓库调拨按基础单位计量、流程内不做任何包装折算，已拒绝" +
+            "（绝不把任意单位按基础单位记账、绝不猜测单位换算、绝不改写数量 / 成本）");
+    }
+
+    private static string UnitDisplay(string? unit)
+        => string.IsNullOrWhiteSpace(unit) ? "未设置" : unit.Trim();
 
     /// <summary>单个调拨仓库的存在性 / 未删除 / 启用校验（只读；<paramref name="role"/> = 调出 / 调入）。</summary>
     private static async Task EnsureLiveWarehouseAsync(IErpDbContext db, long warehouseId, string role,
