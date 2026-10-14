@@ -1,0 +1,63 @@
+{
+  "title": "Reject unrepresentable sourcing minimum-order quantities before persisting the product-supplier relation",
+  "description": "Stage 3 quantity guard for the product-supplier sourcing relation that the replenishment worksheet and the purchase-quote price history read. db_owner.BaseProductSuppliers is created with MinOrderQty DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:1351-1359) and the EF model already declares HasPrecision(18,4) (ErpDbContext.Config.cs:148), but the write guard only enforces a business cap: ProductSupplierRules.MaxMinOrderQty is 999999999 and Normalize accepts any non-negative value up to that cap without any decimal-scale check (src/ERP.Application/Services/ProductSupplierRules.cs:35,:138-142), so a five-decimal minimum-order quantity such as 10.12345 - or 999999999.99999, which lands above the cap once the column rounds it - passes validation and is silently rounded on write. Require MinOrderQty to be storable verbatim in the declared four-decimal column on create and update while keeping 0 as unspecified and the existing business cap. Keep the live product and supplier authority, the scope-key, duplicate, preferred-uniqueness, reference-selectability and bounded-field rules and every downstream consumer semantics unchanged. Add no table, column, index, menu, permission or user grant, no schema or DDL change, no arbitrary SQL, no report change and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Safe Release with analyzers and warnings as errors is the engineering gate, and build completion alone is not stage acceptance.",
+  "acceptance_criteria": [
+    "Product-supplier sourcing create and update validate MinOrderQty against the declared four-decimal db_owner.BaseProductSuppliers.MinOrderQty column, accepting verbatim any non-negative value up to the existing business cap that carries at most four decimals (0 stays unspecified) and rejecting any negative, over-cap or more-than-four-decimal value - including a value that exceeds the cap only after rounding to four decimals - with the existing controlled validation error before any BaseProductSuppliers row is written or changed.",
+    "Existing sourcing authority and semantics are unchanged: live product and supplier permissions, reference selectability, scope-key derivation, per-scope supplier uniqueness, preferred uniqueness for active relations, bounded item code, unit, lead time and remark validation, enable/disable/preferred/delete routes and the replenishment worksheet and price-history readings of the stored quantity; no permission, menu, table, column, index or report semantic is added and no anonymous or administrative fallback is introduced.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum below the business cap, half-up rounding that lands exactly on the limit, fifth-decimal rejection, negative and over-cap rejection, the zero-unspecified case, unchanged rows on rejection and the existing product-supplier sourcing, authorization and preferred-uniqueness regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Product-supplier sourcing create and update validate MinOrderQty against the declared four-decimal db_owner.BaseProductSuppliers.MinOrderQty column, accepting verbatim any non-negative value up to the existing business cap that carries at most four decimals (0 stays unspecified) and rejecting any negative, over-cap or more-than-four-decimal value - including a value that exceeds the cap only after rounding to four decimals - with the existing controlled validation error before any BaseProductSuppliers row is written or changed.": [
+      "src/ERP.Application/Services/ProductSupplierRules.cs",
+      "src/ERP.UnitTests/ProductSupplierMinOrderQtyPersistedBoundsTests.cs",
+      "src/ERP.IntegrationTests/ProductSupplierMinOrderQtyPersistedBoundsSqlServerTests.cs",
+      "docs/product-supplier-min-order-qty-persisted-bounds.md"
+    ],
+    "Existing sourcing authority and semantics are unchanged: live product and supplier permissions, reference selectability, scope-key derivation, per-scope supplier uniqueness, preferred uniqueness for active relations, bounded item code, unit, lead time and remark validation, enable/disable/preferred/delete routes and the replenishment worksheet and price-history readings of the stored quantity; no permission, menu, table, column, index or report semantic is added and no anonymous or administrative fallback is introduced.": [
+      "src/ERP.Application/Services/ProductSupplierRules.cs",
+      "src/ERP.UnitTests/ProductSupplierTests.cs",
+      "src/ERP.IntegrationTests/ProductSupplierSourcingAuthorizationSqlServerTests.cs",
+      "docs/product-supplier-min-order-qty-persisted-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum below the business cap, half-up rounding that lands exactly on the limit, fifth-decimal rejection, negative and over-cap rejection, the zero-unspecified case, unchanged rows on rejection and the existing product-supplier sourcing, authorization and preferred-uniqueness regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/ProductSupplierMinOrderQtyPersistedBoundsTests.cs",
+      "src/ERP.UnitTests/ProductSupplierTests.cs",
+      "src/ERP.IntegrationTests/ProductSupplierSourcingAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ProductSupplierMinOrderQtyPersistedBoundsSqlServerTests.cs",
+      "docs/product-supplier-min-order-qty-persisted-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/Services/ProductSupplierRules.cs",
+    "src/ERP.UnitTests/ProductSupplierTests.cs",
+    "src/ERP.UnitTests/ProductSupplierMinOrderQtyPersistedBoundsTests.cs",
+    "src/ERP.IntegrationTests/ProductSupplierSourcingAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ProductSupplierMinOrderQtyPersistedBoundsSqlServerTests.cs",
+    "docs/product-supplier-min-order-qty-persisted-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Infrastructure/Data/SchemaUpgrader.cs:1351-1359 create db_owner.BaseProductSuppliers with MinOrderQty DECIMAL(18,4) NOT NULL DEFAULT 0 and src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:148 already declares modelBuilder.Entity<BaseProductSupplier>().Property(x => x.MinOrderQty).HasPrecision(18, 4), but the write guard enforces only a business cap: src/ERP.Application/Services/ProductSupplierRules.cs:35 declares MaxMinOrderQty 999999999 and :127-155 Normalize accepts any non-negative minOrderQty up to that cap with no decimal-scale check (:138-142), so a five-decimal quantity such as 10.12345, or 999999999.99999 which lands above the cap once rounded to four decimals, passes validation and is silently rounded by the declared column; src/ERP.Application/Services/ProductSupplierService.cs:197-213 (create) and :254-265 (update) persist payload.MinOrderQty verbatim from the normalized payload; src/ERP.Domain/Entities/BaseProductSupplier.cs:54 declares MinOrderQty as decimal; the stored value is consumed by src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs:177 and src/ERP.Application/Services/PurchaseQuotePriceHistory.cs:221, so silent rounding changes replenishment and price-history guidance; src/ERP.UnitTests/ProductSupplierTests.cs:1169-1170 and :1253 already assert the declared four-decimal model mapping and the 100.5 round-trip but no over-scale rejection, and ERP-441/ERP-444 added live authority and reference validation only, so no existing task covers minimum-order-quantity storage precision.",
+  "depends_on": [
+    "ERP-441",
+    "ERP-444"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "requires_human_approval": false,
+  "id": "ERP-539",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "auto_start": true,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "created_at": "2026-10-14T09:14:22.395796Z"
+}

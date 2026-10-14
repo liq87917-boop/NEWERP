@@ -1,0 +1,77 @@
+{
+  "title": "Store the purchase-order tax rate at its declared four-decimal precision",
+  "description": "Stage 3 procurement-chain guard. The repository's own upgrade script declares db_owner.PurchaseOrders.TaxRate DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:925), but the EF model declares no precision for PurchaseOrder (ErpDbContext.Config.cs:181 configures only the OrderNo unique index), so EF maps TaxRate to decimal(18,2) while the guard checks only the 0~100 range (src/ERP.Application/Services/PurchaseOrderAmountRules.cs:25-28,:101-103 through :132), silently rounding any three- or four-decimal tax rate on write. Align the EF mapping with the declared four-decimal column and make every persisted write reject, never round, a rate that cannot be stored verbatim at four decimals, before number reservation and before any tracked mutation. Keep every route's live identity, account status and purchase-order menu authority, the owning-customer scope, linked sales-order source and master-reference rules, server-side detail amount and total recomputation and the existing two-decimal mapping of all other PurchaseOrder and PurchaseOrderDetail columns. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no report route or template change and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Safe Release with analyzers and warnings as errors is the engineering gate, and build completion alone is not stage acceptance.",
+  "acceptance_criteria": [
+    "Purchase-order create and update validate TaxRate against the declared four-decimal db_owner.PurchaseOrders.TaxRate column, accepting verbatim any rate inside the existing 0..100 policy that carries at most four decimals and rejecting any over-magnitude or more-than-four-decimal rate with the existing controlled validation error before the document number is reserved and before any tracked mutation, so a rejected save writes or changes no PurchaseOrder row while an accepted rate round-trips verbatim through the EF mapping.",
+    "Existing purchase-order authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing purchase-order menu resolved before every read and write, the owning-customer scope, linked sales-order source and master-reference validation, submit, approve, cancel and delete lifecycle rules, server-side detail amount and total recomputation, the declared two-decimal mapping and bounds of every other PurchaseOrder and PurchaseOrderDetail decimal column, and the supplier tax-rate and purchase-quote conversion propagation behaviour; no permission, menu, table, column, index, currency or report semantic is added or changed and no anonymous or administrative fallback is introduced.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude and 0..100 policy rejection, unchanged rows on rejection and the existing purchase-order write-validation, controller, mutation and conversion regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Purchase-order create and update validate TaxRate against the declared four-decimal db_owner.PurchaseOrders.TaxRate column, accepting verbatim any rate inside the existing 0..100 policy that carries at most four decimals and rejecting any over-magnitude or more-than-four-decimal rate with the existing controlled validation error before the document number is reserved and before any tracked mutation, so a rejected save writes or changes no PurchaseOrder row while an accepted rate round-trips verbatim through the EF mapping.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/PurchaseOrderAmountRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.UnitTests/PurchaseOrderTaxRatePersistedBoundsTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderTaxRatePersistedBoundsSqlServerTests.cs",
+      "docs/purchase-order-tax-rate-persisted-bounds.md"
+    ],
+    "Existing purchase-order authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing purchase-order menu resolved before every read and write, the owning-customer scope, linked sales-order source and master-reference validation, submit, approve, cancel and delete lifecycle rules, server-side detail amount and total recomputation, the declared two-decimal mapping and bounds of every other PurchaseOrder and PurchaseOrderDetail decimal column, and the supplier tax-rate and purchase-quote conversion propagation behaviour; no permission, menu, table, column, index, currency or report semantic is added or changed and no anonymous or administrative fallback is introduced.": [
+      "src/ERP.Application/Services/PurchaseOrderAmountRules.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+      "docs/purchase-order-tax-rate-persisted-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude and 0..100 policy rejection, unchanged rows on rejection and the existing purchase-order write-validation, controller, mutation and conversion regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseOrderTaxRatePersistedBoundsTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderWriteValidationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderTaxRatePersistedBoundsSqlServerTests.cs",
+      "docs/purchase-order-tax-rate-persisted-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/PurchaseOrderAmountRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+    "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderTaxRatePersistedBoundsTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderWriteValidationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderTaxRatePersistedBoundsSqlServerTests.cs",
+    "docs/purchase-order-tax-rate-persisted-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Infrastructure/Data/SchemaUpgrader.cs:925 declares ALTER TABLE db_owner.PurchaseOrders ADD TaxRate DECIMAL(18,4) NOT NULL DEFAULT 0 when the column is missing; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:181 configures only modelBuilder.Entity<PurchaseOrder>().HasIndex(x => x.OrderNo).IsUnique() and the file contains no Entity<PurchaseOrder> precision entry, so EF maps TaxRate (src/ERP.Domain/Entities/PurchaseOrder.cs) to decimal(18,2); src/ERP.Application/Services/PurchaseOrderAmountRules.cs:25-28 declare MinTaxRate/MaxTaxRate 0/100, :33-46 declare DecimalPrecision 18 and DecimalScale 2 with the comment that PurchaseOrders declares no HasPrecision, :101-103 implement Validate as a range-only check and :132 ValidateNewWrite calls that range check, so a four-decimal tax rate passes and is rounded; src/ERP.Application/Services/PurchaseOrderMutationRules.cs:149-150 forwards EnsureValidatedTerms to ValidateNewWrite; src/ERP.Api/Controllers/PurchaseOrderController.cs:348 (create) and :479 with :395 (update) are the write gates; src/ERP.Api/Controllers/PurchaseQuoteConversion.cs:425 copies the source tax rate onto the order; ERP-426 and ERP-531 aligned amount guards and supplier rates only, so no existing task covers the purchase-order tax-rate scale.",
+  "depends_on": [
+    "ERP-426",
+    "ERP-531"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "requires_human_approval": false,
+  "id": "ERP-537",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "auto_start": true,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "created_at": "2026-10-14T09:14:22.391890Z"
+}

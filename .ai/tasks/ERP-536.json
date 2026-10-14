@@ -1,0 +1,79 @@
+{
+  "title": "Store the sales-order commission ratio at its declared four-decimal precision",
+  "description": "Stage 3 sales-chain guard. The repository's own upgrade script declares db_owner.SalesOrders.CommissionRatio DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:910) and ERP-531 already aligned the customer CommissionRatio that the conversion copies in (src/ERP.Api/Controllers/SalesOrderConversion.cs:329), but the EF model declares no precision for SalesOrder (ErpDbContext.Config.cs:180 configures only the OrderNo unique index), so EF maps CommissionRatio to decimal(18,2) while the guard checks only the 0~100 range (src/ERP.Application/Services/SalesOrderAmountRules.cs:33-36,:109-117 through :167-189), silently rounding any three- or four-decimal ratio on write. Align the EF mapping with the declared four-decimal column and make every persisted write reject, never round, a ratio that cannot be stored verbatim at four decimals, before number reservation and before any tracked mutation. Keep every route's live identity, account status and sales-order menu authority, the ERP-097 scope, source lineage, change-request lifecycle, server-side detail/total/deposit recomputation and the existing two-decimal mapping of all other SalesOrder and SalesOrderDetail columns. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no report route or template change and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Safe Release with analyzers and warnings as errors is the engineering gate, and build completion alone is not stage acceptance.",
+  "acceptance_criteria": [
+    "Sales-order create and update validate CommissionRatio against the declared four-decimal db_owner.SalesOrders.CommissionRatio column, accepting verbatim any ratio inside the existing 0..100 policy that carries at most four decimals and rejecting any over-magnitude or more-than-four-decimal ratio with the existing controlled validation error before the document number is reserved and before any tracked mutation, so a rejected save writes or changes no SalesOrder row while an accepted ratio round-trips verbatim through the EF mapping.",
+    "Existing sales-order authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing sales-order menu resolved before every read and write, the ERP-097 salesperson scope, source lineage and change-request lifecycle rules, the ordinary zero-ratio policy, server-side detail amount, total and deposit recomputation, the declared two-decimal mapping and bounds of every other SalesOrder and SalesOrderDetail decimal column, and the customer-commission-ratio conversion and change-request proposal snapshot behaviour; no permission, menu, table, column, index, currency or report semantic is added or changed and no anonymous or administrative fallback is introduced.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude and 0..100 policy rejection, unchanged rows on rejection and the existing sales-order write-validation, controller, conversion and change-request regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Sales-order create and update validate CommissionRatio against the declared four-decimal db_owner.SalesOrders.CommissionRatio column, accepting verbatim any ratio inside the existing 0..100 policy that carries at most four decimals and rejecting any over-magnitude or more-than-four-decimal ratio with the existing controlled validation error before the document number is reserved and before any tracked mutation, so a rejected save writes or changes no SalesOrder row while an accepted ratio round-trips verbatim through the EF mapping.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/SalesOrderAmountRules.cs",
+      "src/ERP.Application/Services/SalesOrderMutationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.UnitTests/SalesOrderCommissionRatioPersistedBoundsTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderCommissionRatioPersistedBoundsSqlServerTests.cs",
+      "docs/sales-order-commission-ratio-persisted-bounds.md"
+    ],
+    "Existing sales-order authority and semantics are unchanged: live enabled nondeleted identity, account status and the existing sales-order menu resolved before every read and write, the ERP-097 salesperson scope, source lineage and change-request lifecycle rules, the ordinary zero-ratio policy, server-side detail amount, total and deposit recomputation, the declared two-decimal mapping and bounds of every other SalesOrder and SalesOrderDetail decimal column, and the customer-commission-ratio conversion and change-request proposal snapshot behaviour; no permission, menu, table, column, index, currency or report semantic is added or changed and no anonymous or administrative fallback is introduced.": [
+      "src/ERP.Application/Services/SalesOrderAmountRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+      "src/ERP.UnitTests/SalesOrderWriteValidationTests.cs",
+      "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "docs/sales-order-commission-ratio-persisted-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal maximum, half-up rounding that lands exactly on the limit, fifth-decimal rejection, magnitude and 0..100 policy rejection, unchanged rows on rejection and the existing sales-order write-validation, controller, conversion and change-request regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/SalesOrderCommissionRatioPersistedBoundsTests.cs",
+      "src/ERP.UnitTests/SalesOrderWriteValidationTests.cs",
+      "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderWriteValidationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderCommissionRatioPersistedBoundsSqlServerTests.cs",
+      "docs/sales-order-commission-ratio-persisted-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/SalesOrderAmountRules.cs",
+    "src/ERP.Application/Services/SalesOrderMutationRules.cs",
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+    "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+    "src/ERP.UnitTests/SalesOrderWriteValidationTests.cs",
+    "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+    "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+    "src/ERP.UnitTests/SalesOrderCommissionRatioPersistedBoundsTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderWriteValidationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderCommissionRatioPersistedBoundsSqlServerTests.cs",
+    "docs/sales-order-commission-ratio-persisted-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Infrastructure/Data/SchemaUpgrader.cs:910 declares ALTER TABLE db_owner.SalesOrders ADD CommissionRatio DECIMAL(18,4) NOT NULL DEFAULT 0 when the column is missing; src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:180 configures only modelBuilder.Entity<SalesOrder>().HasIndex(x => x.OrderNo).IsUnique() and the file contains no Entity<SalesOrder> precision entry, so EF maps CommissionRatio (src/ERP.Domain/Entities/SalesOrder.cs) to decimal(18,2); src/ERP.Application/Services/SalesOrderAmountRules.cs:33-36 declare MinCommissionRatio/MaxCommissionRatio 0/100, :45-54 declare DecimalPrecision 18 and DecimalScale 2 with the comment that SalesOrders declares no HasPrecision, :74-76 implement IsRepresentable at two decimals, :109-117 implement Validate as a range-only check and :167-189 ValidateNewWrite calls that range check, so a four-decimal ratio passes and is rounded; src/ERP.Application/Services/SalesOrderMutationRules.cs:128-129 forwards EnsureValidatedTerms to ValidateNewWrite; src/ERP.Api/Controllers/SalesOrderController.cs:419-421 (create) and :606 with :620-624 (update) are the ordinary write gates; src/ERP.Api/Controllers/SalesOrderConversion.cs:329 copies the four-decimal customer commission ratio into the order and src/ERP.Application/Services/SalesOrderChangeRequestService.cs:363,:389,:546,:703,:785 carry it through proposals with :760-766 reusing the order-level guards; ERP-422 and ERP-531 aligned quantity/amount guards and the customer ratio only, so no existing task covers the sales-order commission-ratio scale.",
+  "depends_on": [
+    "ERP-422",
+    "ERP-531"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "requires_human_approval": false,
+  "id": "ERP-536",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "auto_start": true,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "created_at": "2026-10-14T09:14:22.389937Z"
+}

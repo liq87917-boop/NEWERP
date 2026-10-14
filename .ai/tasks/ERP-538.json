@@ -1,0 +1,88 @@
+{
+  "title": "Store expense amounts, tax, allocation scalars and exchange rate at their declared four- and six-decimal precision",
+  "description": "Stage 3 finance guard for the expense bill that the legacy container allocation and the ERP-042 allocation batches derive from. db_owner.FinanceExpenses is created by the authoritative upgrade script with Amount DECIMAL(18,4), ExchangeRate DECIMAL(18,6), AmountCny DECIMAL(18,4), TaxRate DECIMAL(18,4), TaxAmount DECIMAL(18,4), AllocationRatio DECIMAL(18,4) and AllocatedAmount DECIMAL(18,4) (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:385-398), but the EF model declares no precision for FinanceExpense (ErpDbContext.Config.cs:417-419 configure only two text columns and an index), so EF maps all seven columns to decimal(18,2); ExpenseAuthorizationRules asserts DECIMAL(18,2) and rounds amounts and the exchange rate to two decimals (:54-76, :177-195, :202-257) while the batch path already treats the source exchange rate as DECIMAL(18,6) (ContainerExpenseAllocationService.cs:480-488, ContainerExpenseAllocationRules.cs:103), so a genuinely representable four-decimal amount or six-decimal rate is rounded or rejected today. Align the EF mapping and the guards with the declared columns, keeping the existing currency-precision rounding of derived values, the zero-value optional tax/allocation semantics, the residual and ratio algorithm and every authority and scope rule intact. Add no table, column, index, menu, permission or user grant, no anonymous or administrative fallback, no schema or DDL change, no arbitrary SQL, no report change and no production, credential or environment change. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong or existing targets and never drop or reset. Safe Release with analyzers and warnings as errors is the engineering gate, and build completion alone is not stage acceptance.",
+  "acceptance_criteria": [
+    "Expense create and update validate Amount, AmountCny, TaxRate, TaxAmount, AllocationRatio and AllocatedAmount against the declared four-decimal db_owner.FinanceExpenses columns and ExchangeRate against the declared six-decimal column, accepting verbatim any representable value (rate strictly positive) and rejecting any negative, over-magnitude or over-scale value with the existing controlled validation error before any tracked mutation, so a rejected request writes or changes no FinanceExpense row and an accepted value round-trips verbatim through the EF mapping.",
+    "Existing expense authority and behaviour are unchanged: live nondeleted identity, account status, the existing expense-bill menu and the authoritative customer scope checked before every read and write, zero-value optional tax, allocation ratio and allocated amount handling, the existing currency-precision rounding of derived amounts and of the legacy allocation CNY expression, the allocation residual and ratio algorithm, single document-number reservation, the stored-source read-only recheck, batch preview/generate parity and void/cancel semantics; no permission, menu, table, column, index, report or downstream document semantic is added or changed.",
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal amount, tax, ratio and allocation maximum and the exact six-decimal rate maximum, half-up rounding that lands exactly on the limit, fifth-decimal amount and ratio rejection, seventh-decimal rate rejection, magnitude rejection, unchanged FinanceExpense rows on rejection and the existing expense authorization, allocation, allocation-evidence and concurrency regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance."
+  ],
+  "criterion_path_map": {
+    "Expense create and update validate Amount, AmountCny, TaxRate, TaxAmount, AllocationRatio and AllocatedAmount against the declared four-decimal db_owner.FinanceExpenses columns and ExchangeRate against the declared six-decimal column, accepting verbatim any representable value (rate strictly positive) and rejecting any negative, over-magnitude or over-scale value with the existing controlled validation error before any tracked mutation, so a rejected request writes or changes no FinanceExpense row and an accepted value round-trips verbatim through the EF mapping.": [
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.UnitTests/ExpenseDeclaredPrecisionTests.cs",
+      "src/ERP.IntegrationTests/ExpenseDeclaredPrecisionSqlServerTests.cs",
+      "docs/expense-persisted-numeric-bounds.md"
+    ],
+    "Existing expense authority and behaviour are unchanged: live nondeleted identity, account status, the existing expense-bill menu and the authoritative customer scope checked before every read and write, zero-value optional tax, allocation ratio and allocated amount handling, the existing currency-precision rounding of derived amounts and of the legacy allocation CNY expression, the allocation residual and ratio algorithm, single document-number reservation, the stored-source read-only recheck, batch preview/generate parity and void/cancel semantics; no permission, menu, table, column, index, report or downstream document semantic is added or changed.": [
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ExpenseAllocateDtos.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "docs/expense-persisted-numeric-bounds.md"
+    ],
+    "Unit boundary and round-trip cases plus a genuine isolated SQL round-trip cover the exact four-decimal amount, tax, ratio and allocation maximum and the exact six-decimal rate maximum, half-up rounding that lands exactly on the limit, fifth-decimal amount and ratio rejection, seventh-decimal rate rejection, magnitude rejection, unchanged FinanceExpense rows on rejection and the existing expense authorization, allocation, allocation-evidence and concurrency regressions; safe Release with analyzers and warnings as errors and the full unit suite are required, genuine SQL runs only on a fresh GUID-owned NEWERP_AUTOTEST database on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and is never dropped or reset, and build completion alone is not stage acceptance.": [
+      "src/ERP.UnitTests/ExpenseDeclaredPrecisionTests.cs",
+      "src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+      "src/ERP.IntegrationTests/ExpensePersistedNumericBoundsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseDeclaredPrecisionSqlServerTests.cs",
+      "docs/expense-persisted-numeric-bounds.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationRules.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+    "src/ERP.Api/Controllers/ExpenseBillController.cs",
+    "src/ERP.Api/Controllers/ExpenseAllocateDtos.cs",
+    "src/ERP.UnitTests/ExpenseDeclaredPrecisionTests.cs",
+    "src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs",
+    "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+    "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+    "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+    "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+    "src/ERP.IntegrationTests/ExpenseDeclaredPrecisionSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ExpensePersistedNumericBoundsSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+    "docs/expense-persisted-numeric-bounds.md"
+  ],
+  "implementation_evidence": "src/ERP.Infrastructure/Data/SchemaUpgrader.cs:380-398 create db_owner.FinanceExpenses with Amount DECIMAL(18,4) (:385), ExchangeRate DECIMAL(18,6) (:387), AmountCny DECIMAL(18,4) (:388), TaxRate DECIMAL(18,4) (:389), TaxAmount DECIMAL(18,4) (:390), AllocationRatio DECIMAL(18,4) (:397) and AllocatedAmount DECIMAL(18,4) (:398); src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:417-419 configure only AllocationBatchNo, AllocationSourceExpenseNo and an index for FinanceExpense, with no precision entry, so EF maps all seven columns (src/ERP.Domain/Entities/FinanceExpense.cs) to decimal(18,2); src/ERP.Application/Services/ExpenseAuthorizationRules.cs:54-76 declare AmountDecimals 2 and DECIMAL(18,2) labels, :177-195 NormalizeAmount/NormalizeRate round to two decimals, :202-207, :213-217, :225-234 and :241-257 judge scalars, the derived CNY amount and stored source scalars at two decimals; src/ERP.Api/Controllers/ExpenseBillController.cs:194 create, :212 update, :63 AllocateApply with :90 and :451 Calculate apply those rules; the batch path already assumes the declared rate scale (src/ERP.Application/Services/ContainerExpenseAllocationService.cs:480-488 rechecks the stored source amount at two decimals but the stored source rate at six, and ContainerExpenseAllocationRules.cs:103 labels that rate column DECIMAL(18,6)); docs/expense-persisted-numeric-bounds.md:26 states verbatim that these FinanceExpense columns are DECIMAL(18,2) because the model declares no precision and src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs:150-162 asserts that default; ERP-512 bounded the scalars at the assumed two-decimal precision only, so no existing task aligns them with the declared four- and six-decimal columns.",
+  "depends_on": [
+    "ERP-512",
+    "ERP-042",
+    "ERP-496"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "requires_human_approval": false,
+  "id": "ERP-538",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "auto_start": true,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "created_at": "2026-10-14T09:14:22.393860Z"
+}
