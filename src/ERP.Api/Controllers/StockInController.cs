@@ -45,6 +45,12 @@ namespace ERP.Api.Controllers;
 /// 明细没有客户端价格 / 成本字段：成本口径仍由 ERP-033 权威来源解析，绝不臆造来源、绝不改写已审核采购价；
 /// 历史取消 / 冲销路径（含无流水历史单据的原路冲回）不新增任何校验闸门。被拒绝的请求零单号消耗、
 /// 零表头 · 明细 · 来源 · 状态 · 库存 · 流水变化。</para>
+/// <para>ERP-522：创建 / 修改在单位折算<b>同一次批量商品读取</b>内追加共享单位资格闸门
+/// （<see cref="StockUnitConversion.IsUnitEligible"/>）：显式提供的非空明细单位（去首尾空白、大小写不敏感）必须等于商品当前
+/// 基础单位或合法装箱单位，其他任意单位在单号预约与任何表头 / 明细写入之前受控拒绝；空单位保持既有回退，
+/// 装箱单位按当前正数 <c>UnitsPerPackage</c> 恰好折算一次。提交 / 审核作为承诺边界在既有来源 / 单据锁内复核
+/// <b>仍然生效</b>明细的单位资格（<see cref="StockUnitConversion.EnsureUnitsEligibleAsync"/>），主数据被改写 /
+/// 越界即受控拒绝并整体回滚；绝不臆造来源、绝不猜测任意单位换算、绝不改写历史单位。</para>
 /// </summary>
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
@@ -181,7 +187,9 @@ public class StockInController : DocumentControllerBase<StockIn>
         await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
         await StockInAuthorizationRules.EnsureAuthorizedAsync(
             Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
-        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        // ERP-522：单位资格闸门与装箱折算复用同一次批量商品读取 —— 显式非空的越界单位在单号预约与
+        // 任何表头 / 明细写入之前受控拒绝；空单位保持既有回退，装箱折算恰好一次。
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details, ensureUnitEligible: true);
         Calculate(entity);
         await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
         // ERP-504：草稿护栏（逐行形状 / 实际存储精度 / 表头合计 + 批量在用商品）在单位折算与来源校验之后、
@@ -222,6 +230,8 @@ public class StockInController : DocumentControllerBase<StockIn>
         await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
         // ERP-504：承诺边界复核（当前主数据 + 已存数值）；拒绝时零状态变化、零库存 / 流水。
         await StockInAuthorizationRules.EnsureCommitReadyAsync(Db, entity.Details, "提交");
+        // ERP-522：承诺边界复核仍然生效的已存明细单位资格（当前主数据实时快照；空单位保持既有回退）。
+        await StockUnitConversion.EnsureUnitsEligibleAsync(Db, entity.Details.Where(d => !d.IsDeleted));
         return await base.Submit(id);
     }
 
@@ -270,7 +280,7 @@ public class StockInController : DocumentControllerBase<StockIn>
         // ERP-504：请求侧内容（单位折算 → 来源链接 → 草稿护栏）先在同一份请求对象上完成全部校验，
         // 只有全部通过才改写已存单据 / 明细 —— 任一失败都不改单据 / 明细 / 状态，也不消耗新单号。
         ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
-        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details, ensureUnitEligible: true);
         await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
         await StockInAuthorizationRules.EnsureDraftValidAsync(Db, entity.Details);
 
@@ -332,6 +342,8 @@ public class StockInController : DocumentControllerBase<StockIn>
             // ERP-504：承诺边界复核（空 / 非正 / 不可表示数量、精度与合计、当前在用商品）在既有来源 / 单据锁内完成；
             // 任一不满足即拒绝，单据状态 / 来源数量 / 成本 / 库存 / 流水全部保持原样（整体回滚）。
             await StockInAuthorizationRules.EnsureCommitReadyAsync(Db, entity.Details, "审核");
+            // ERP-522：在既有来源 / 单据锁内复核仍然生效明细的单位资格（当前商品快照）；越界即整体回滚。
+            await StockUnitConversion.EnsureUnitsEligibleAsync(Db, entity.Details.Where(d => !d.IsDeleted));
 
             await StockInOrderFulfillmentRules.ValidateApprovalAsync(Db, entity);
 
