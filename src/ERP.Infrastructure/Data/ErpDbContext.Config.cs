@@ -206,6 +206,19 @@ public partial class ErpDbContext
             .IsUnique().HasDatabaseName("UX_Quotations_RevisionChain")
             .HasFilter("IsDeleted = 0 AND RootQuotationId IS NOT NULL");
 
+        // ============ ERP-533：报价单主表 / 明细的持久化小数位（与 SchemaUpgrader 第 20 段建表脚本同源） ============
+        // 说明：权威升级脚本把 db_owner.Quotations.ExchangeRate 声明为 DECIMAL(18,6)，把 TotalAmount /
+        //       TotalAmountCny 声明为 DECIMAL(18,4)，把 db_owner.QuotationDetails 的 Quantity / UnitPrice /
+        //       Amount 声明为 DECIMAL(18,4)。EF 模型此前**未**显式 HasPrecision，按 SQL Server 默认精度把这些列
+        //       映射为 decimal(18,2)，于是合法的 6 位小数汇率与 4 位小数数量 / 单价会在写入前被**静默取整**。
+        //       这里逐列与建表脚本对齐 —— 只改映射，不新增 / 修改任何表、列、索引、菜单或权限。
+        modelBuilder.Entity<Quotation>().Property(x => x.ExchangeRate).HasPrecision(18, 6);
+        modelBuilder.Entity<Quotation>().Property(x => x.TotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<Quotation>().Property(x => x.TotalAmountCny).HasPrecision(18, 4);
+        modelBuilder.Entity<QuotationDetail>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<QuotationDetail>().Property(x => x.UnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<QuotationDetail>().Property(x => x.Amount).HasPrecision(18, 4);
+
         // ============ 单据号唯一索引（ERP-009：库存单据使用 EF 主子表） ============
         modelBuilder.Entity<StockAdjustment>().HasIndex(x => x.AdjustmentNo).IsUnique();
         modelBuilder.Entity<StockTransfer>().HasIndex(x => x.TransferNo).IsUnique();

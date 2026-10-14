@@ -24,11 +24,11 @@ ERP-470 把币种 / 汇率 / 数量 / 单价 / 金额 / 合计收敛到**一份*
 | 项 | 要求 |
 |---|---|
 | 币种 | `Currency` 枚举**已定义**值（不跨币种合计，未定义值一律拒绝） |
-| 汇率 | `> 0` 且在 `DECIMAL(18,2)` 内可表示（**绝不**再静默按 1 处理） |
-| 逐行数量 | `> 0` 且在 `DECIMAL(18,2)` 内可表示（绝不把正数量静默舍入为 0） |
-| 逐行单价 | `>= 0` 且在 `DECIMAL(18,2)` 内可表示（保留既有「零单价」政策） |
+| 汇率 | `> 0` 且在**汇率列实际精度** `DECIMAL(18,6)` 内可表示（最多 6 位小数、量级有界；**绝不**再静默按 1 处理，也绝不静默取整） |
+| 逐行数量 | `> 0` 且在**数量列实际精度** `DECIMAL(18,4)` 内可表示（最多 4 位小数、量级有界；绝不把正数量静默舍入为 0） |
+| 逐行单价 | `>= 0` 且在**单价列实际精度** `DECIMAL(18,4)` 内可表示（最多 4 位小数、量级有界；保留既有「零单价」政策） |
 | 明细注入 | 客户端明细中的软删除行（`IsDeleted = true`）**拒绝**，绝不静默写入 |
-| 行金额 / 合计 | 由服务端按 `CurrencyAmountRules` 的币种精度（JPY / KRW / VND / IDR 为 0 位、其余 2 位、0.5 进位）从有效明细派生；`decimal` 溢出或超精度一律受控拒绝 |
+| 行金额 / 合计 | 由服务端按 `CurrencyAmountRules` 的币种精度（JPY / KRW / VND / IDR 为 0 位、其余 2 位、0.5 进位）从有效明细派生；`decimal` 溢出或超出 `DECIMAL(18,4)` 金额列容量一律受控拒绝 |
 | 折人民币合计 | `Σ 行金额 × 汇率` 按 **CNY 精度（2 位）** 取整；放大后越界同样受控拒绝 |
 
 三种调用口径（同一份实现，不存在第二套算法）：
@@ -68,12 +68,16 @@ ERP-470 把币种 / 汇率 / 数量 / 单价 / 金额 / 合计收敛到**一份*
 被拒绝的请求：**表头、明细、来源单据、状态与单号预约全部不变**（新增 / 修改在事务与行锁之前拒绝；
 承诺路径在 `SaveChanges` 之前拒绝，事务整体回滚，行锁只刷新技术审计时间戳 `UpdatedAt`）。
 
-## 5. 实际 EF 精度
+## 5. 实际 EF 精度（ERP-533：与声明列对齐）
 
-报价单主表与明细（`db_owner.Quotations` / `db_owner.QuotationDetails`）在 EF 模型中**未**显式 `HasPrecision`，
-因此数量 / 单价 / 行金额 / 合计 / 折人民币 / 汇率一律按 EF 默认的 **`DECIMAL(18,2)`** 落库；
-契约以常量固化该口径（`DecimalPrecision = 18`、`DecimalScale = 2`、`MaxDecimal = 9_999_999_999_999_999.99m`），
-并由单元测试用 SQL Server 提供程序**仅构建模型**（不打开连接）逐列断言与常量同源。
+报价单主表与明细（`db_owner.Quotations` / `db_owner.QuotationDetails`）由权威升级脚本（`SchemaUpgrader` 第 20 段）
+声明为：`ExchangeRate DECIMAL(18,6)`、`TotalAmount` / `TotalAmountCny DECIMAL(18,4)`、
+`Quantity` / `UnitPrice` / `Amount DECIMAL(18,4)`。
+EF 模型（`ErpDbContext.Config.cs`）现已按 ERP-533 对上述六列显式声明 `HasPrecision(18, 6)` / `HasPrecision(18, 4)`，
+与建表脚本逐字一致；契约以常量固化该口径（`DecimalPrecision = 18`、`ExchangeRateScale = 6`、`AmountScale = 4`、
+`MaxExchangeRate = 999_999_999_999.999999`、`MaxAmount = 99_999_999_999_999.9999`），
+并由单元测试用 SQL Server 提供程序**仅构建模型**（不打开连接）逐列断言与常量同源，
+真实列精度另由专用 localdb 上的 `INFORMATION_SCHEMA` 集成用例确认。
 
 ## 6. 边界（不做的事）
 
@@ -93,6 +97,8 @@ ERP-470 把币种 / 汇率 / 数量 / 单价 / 金额 / 合计收敛到**一份*
 | 单元（适配） | `src/ERP.UnitTests/QuotationCrudRegressionTests.cs` | 既有「零汇率静默按 1」失效夹具改为「受控拒绝 + 零写入」，日期 / 金额默认值场景改用合法汇率 |
 | 单元（扩展） | `src/ERP.UnitTests/QuotationMutationTests.cs` / `QuotationRevisionTests.cs` / `QuotationGovernanceTests.cs` / `InquiryQuotationConversionTests.cs` | 契约覆盖全部写入 / 承诺路径的接线断言；非法源版本创建版本零新版本；历史非法条款打印照原样且提交不回填；询价转报价来源条款非法 / 零汇率拒绝与 JPY 派生 |
 | 集成（真实 SQL） | `src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs` | 专用 localdb 上的真实控制器：非法条款零写入零占号、伪造合计被重算且 `Σ 明细 == 合计` 精确落库、JPY 0 位小数落库、提交 / 审核 / 转 PI / 转订单非法历史条款原子拒绝、询价转报价 JPY 派生与来源快照不变、目标护栏 fail-closed |
+| 单元（ERP-533 新增） | `src/ERP.UnitTests/QuotationPersistedNumericBoundsTests.cs` | 声明列精度与常量同源（EF 模型）、六位小数汇率 / 四位小数数量 · 单价与量级边界放行、第 7 位小数汇率 / 第 5 位小数数量 · 单价与量级越界拒绝、服务端派生金额与半进位越界拒绝、新增 / 修改 / 提交 / 转 PI 零写入零占号与原证据不变、源码契约 |
+| 集成（ERP-533 真实 SQL） | `src/ERP.IntegrationTests/QuotationPersistedNumericBoundsSqlServerTests.cs` | 专用 localdb 上的真实控制器：`INFORMATION_SCHEMA` 确认 `decimal(18,6)` / `decimal(18,4)`、六位小数汇率与四位小数数量 · 单价（含声明列上限）以 `CONVERT(varchar, ...)` 原样往返、第 7 位小数 / 第 5 位小数 / 量级越界零行零占号、被拒修改不改写权威行、目标护栏 fail-closed |
 
 - 安全 profile：`dotnet restore` → Release 构建（`TreatWarningsAsErrors=true` + `RunAnalyzersDuringBuild=true`）→
   `ERP.UnitTests` 全量；

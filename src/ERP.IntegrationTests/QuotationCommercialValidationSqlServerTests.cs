@@ -22,7 +22,7 @@ namespace ERP.IntegrationTests;
 /// <item><b>非法条款零写入零占号</b>：非法数量 / 未定义币种 / 非正汇率 / 软删除明细注入在新增 / 修改时被受控业务错误拒绝，
 /// 报价单 / 明细 / PI / 销售订单 / 单号流水全部零变化。</item>
 /// <item><b>服务端权威</b>：客户端伪造的行金额 / 合计在落库时被服务端按币种精度重算覆盖，
-/// <c>Σ 有效明细金额 == 主表总额</c> 在真实 <c>DECIMAL(18,2)</c> 落库后仍精确成立；JPY 按 0 位小数落库。</item>
+/// <c>Σ 有效明细金额 == 主表总额</c> 在真实 <c>DECIMAL(18,4)</c> 金额列落库后仍精确成立；JPY 按 0 位小数落库。</item>
 /// <item><b>承诺前复核</b>：直接改库模拟非法历史条款后，提交 / 审核 / 转 PI / 转销售订单原子拒绝且状态与下游单据不变；
 /// 已审核询价单转报价单按同一契约派生金额且不改写来源状态。</item>
 /// <item><b>专用目标护栏</b>：任何数据库访问之前精确命中 <c>(localdb)\NEWERP_AutoAcceptance</c> +
@@ -268,7 +268,8 @@ public sealed class QuotationCommercialValidationSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
-        var quotation = await _fixture.SeedQuotationAsync(db, DocumentStatus.Approved, Line(0.001m, 10m));
+        // ERP-533：0.001 已是声明列（DECIMAL(18,4)）可逐字存储的合法数量，改用负数模拟非法历史条款。
+        var quotation = await _fixture.SeedQuotationAsync(db, DocumentStatus.Approved, Line(-1m, 10m));
         var before = await SnapshotAsync(db);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>

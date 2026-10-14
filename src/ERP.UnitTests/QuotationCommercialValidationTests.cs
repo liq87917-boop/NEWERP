@@ -15,8 +15,9 @@ namespace ERP.UnitTests;
 /// ERP-470 报价单商业条款（币种 / 汇率 / 数量 / 单价 / 金额 / 合计）校验与整理的单元测试
 /// （纯内存库 + 直接实例化控制器，不连接 SQL Server、不执行任何 DDL / 部署脚本）：
 /// <list type="number">
-/// <item><b>唯一权威契约</b>（<see cref="QuotationCommercialValidationRules"/>）：币种必须已定义、汇率 &gt; 0、
-/// 数量 &gt; 0、单价 ≥ 0 且全部在持久化精度内可表示；软删除明细行注入拒绝；金额与合计一律由服务端按
+/// <item><b>唯一权威契约</b>（<see cref="QuotationCommercialValidationRules"/>）：币种必须已定义、汇率 &gt; 0
+/// 且在汇率列实际精度 <c>DECIMAL(18,6)</c> 内可表示、数量 &gt; 0、单价 ≥ 0 且均在数量 / 单价列实际精度
+/// <c>DECIMAL(18,4)</c> 内可表示；软删除明细行注入拒绝；金额与合计一律由服务端按
 /// <see cref="CurrencyAmountRules"/> 的币种精度（JPY 等 0 位、其余 2 位、0.5 进位）从有效明细派生；</item>
 /// <item><b>EF 精度契约</b>：用 SQL Server 提供程序**仅构建模型**（不打开连接）断言报价单商业列的实际存储精度
 /// 与规则常量同源；</item>
@@ -35,8 +36,9 @@ public class QuotationCommercialValidationTests
     [InlineData(0)]
     [InlineData(-1)]
     [InlineData(-0.5)]
-    [InlineData(0.001)]   // 正数量但会在 DECIMAL(18,2) 被静默舍入为 0
-    [InlineData(1.005)]
+    [InlineData(0.00005)]                 // 正数量但第 5 位小数超出 DECIMAL(18,4)
+    [InlineData(1.00005)]
+    [InlineData(100_000_000_000_000)]     // 超出 DECIMAL(18,4) 上界（合法 4 位小数之上限为 99_999_999_999_999.9999）
     public void 条款校验_数量非正或超出持久化精度_拒绝(decimal quantity)
     {
         var quotation = Draft(Line(quantity, 10m));
@@ -51,7 +53,8 @@ public class QuotationCommercialValidationTests
     [Theory]
     [InlineData(-1)]
     [InlineData(-0.01)]
-    [InlineData(1.005)]
+    [InlineData(1.00005)]                 // 负单价之外：第 5 位小数超出 DECIMAL(18,4)
+    [InlineData(100_000_000_000_000)]     // 超出 DECIMAL(18,4) 上界
     public void 条款校验_单价为负或超出持久化精度_拒绝(decimal unitPrice)
     {
         var quotation = Draft(Line(1m, unitPrice));
@@ -79,7 +82,8 @@ public class QuotationCommercialValidationTests
     [Theory]
     [InlineData(0)]
     [InlineData(-7.2)]
-    [InlineData(7.123)]   // 超出 DECIMAL(18,2)：落库会被静默取整
+    [InlineData(7.1234567)]           // 第 7 位小数超出 DECIMAL(18,6)：落库会被静默取整
+    [InlineData(1_000_000_000_000)]   // 超出 DECIMAL(18,6) 上界（MaxExchangeRate = 999_999_999_999.999999）
     public void 条款校验_汇率非正或不可表示_拒绝(decimal exchangeRate)
     {
         var quotation = Draft(Line(1m, 1m));
@@ -169,37 +173,49 @@ public class QuotationCommercialValidationTests
     [InlineData(2)]
     public void 条款校验_金额超出持久化精度或乘法溢出_受控拒绝(int scenario)
     {
+        // ERP-533：数量 / 单价列实际为 DECIMAL(18,4)，但派生的行金额仍必须落在 4 位小数金额列容量内。
         var quotation = Draft(scenario == 0
-            ? Line(QuotationCommercialValidationRules.MaxDecimal, 10m)                  // 行金额 9.99e16 超精度
-            : Line(QuotationCommercialValidationRules.MaxDecimal,                        // 乘法溢出
-                QuotationCommercialValidationRules.MaxDecimal));
+            ? Line(QuotationCommercialValidationRules.MaxAmount, 10m)                  // 行金额越界
+            : Line(QuotationCommercialValidationRules.MaxAmount,                        // 乘积远超单列容量
+                QuotationCommercialValidationRules.MaxAmount));
 
         var ex = Assert.Throws<BusinessException>(() =>
             QuotationCommercialValidationRules.ValidateIncomingDraft(quotation));
 
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
         Assert.True(ex.Message.Contains("金额", StringComparison.Ordinal)
-                    || ex.Message.Contains("DECIMAL(18,2)", StringComparison.Ordinal));
+                    || ex.Message.Contains("DECIMAL(18,4)", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void 条款校验_最大可表示金额边界_通过_超出边界拒绝()
+    public void 条款校验_金额列上界边界_通过_超出边界拒绝()
     {
-        var boundary = Draft(Line(1m, QuotationCommercialValidationRules.MaxDecimal));
-        boundary.ExchangeRate = 1m;                                 // 折人民币与总额同源，避免汇率放大越界
+        // 金额 / 合计列为 DECIMAL(18,4)：可取整到列容量内的金额照常放行，
+        // 半进位取整越过上界、本身越界或折人民币放大越界一律受控拒绝（绝不静默截断）。
+        const decimal amountCeiling = 99_999_999_999_999.99m;                       // 2 位小数可取整到的最大金额
+        var boundary = Draft(Line(1m, amountCeiling));
+        boundary.ExchangeRate = 1m;                                                 // 折人民币与总额同源，避免汇率放大越界
         QuotationCommercialValidationRules.NormalizeIncomingDraft(boundary);
 
-        Assert.Equal(QuotationCommercialValidationRules.MaxDecimal, boundary.TotalAmount);
-        Assert.Equal(QuotationCommercialValidationRules.MaxDecimal, boundary.TotalAmountCny);
-        Assert.True(QuotationCommercialValidationRules.IsRepresentable(QuotationCommercialValidationRules.MaxDecimal));
+        Assert.Equal(amountCeiling, boundary.TotalAmount);
+        Assert.Equal(amountCeiling, boundary.TotalAmountCny);
+        Assert.True(QuotationCommercialValidationRules.IsRepresentable(
+            QuotationCommercialValidationRules.MaxAmount));                         // 4 位小数上界本身可表示
         Assert.False(QuotationCommercialValidationRules.IsRepresentable(
-            QuotationCommercialValidationRules.MaxDecimal + 1m));
+            QuotationCommercialValidationRules.MaxAmount + 0.0001m));               // 越过 DECIMAL(18,4) 上界
         Assert.False(QuotationCommercialValidationRules.IsRepresentable(decimal.MinValue));
         Assert.False(QuotationCommercialValidationRules.IsLineAmountRepresentable(
-            QuotationCommercialValidationRules.MaxDecimal, QuotationCommercialValidationRules.MaxDecimal));
+            QuotationCommercialValidationRules.MaxAmount, QuotationCommercialValidationRules.MaxAmount));
 
-        // 折人民币按汇率放大后越界同样受控拒绝（绝不静默截断）。
-        var inflated = Draft(Line(1m, QuotationCommercialValidationRules.MaxDecimal));
+        // 半进位取整后恰好越过上界同样受控拒绝。
+        var roundingOver = Draft(Line(1m, 99_999_999_999_999.995m));
+        roundingOver.ExchangeRate = 1m;
+        var roundingError = Assert.Throws<BusinessException>(() =>
+            QuotationCommercialValidationRules.ValidateIncomingDraft(roundingOver));
+        Assert.Equal(ErrorCodes.InvalidParameter, roundingError.Code);
+
+        // 折人民币按汇率放大后越界同样受控拒绝。
+        var inflated = Draft(Line(1m, amountCeiling));
         var ex = Assert.Throws<BusinessException>(() =>
             QuotationCommercialValidationRules.ValidateIncomingDraft(inflated));
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
@@ -226,15 +242,17 @@ public class QuotationCommercialValidationTests
         using var db = new ErpDbContext(options);
         var model = db.Model;
 
-        var expected = $"decimal({QuotationCommercialValidationRules.DecimalPrecision},"
-                       + $"{QuotationCommercialValidationRules.DecimalScale})";
+        var amountType = $"decimal({QuotationCommercialValidationRules.DecimalPrecision},"
+                         + $"{QuotationCommercialValidationRules.AmountScale})";
+        var rateType = $"decimal({QuotationCommercialValidationRules.DecimalPrecision},"
+                       + $"{QuotationCommercialValidationRules.ExchangeRateScale})";
 
-        Assert.Equal(expected, ColumnType(model, typeof(QuotationDetail), nameof(QuotationDetail.Quantity)));
-        Assert.Equal(expected, ColumnType(model, typeof(QuotationDetail), nameof(QuotationDetail.UnitPrice)));
-        Assert.Equal(expected, ColumnType(model, typeof(QuotationDetail), nameof(QuotationDetail.Amount)));
-        Assert.Equal(expected, ColumnType(model, typeof(Quotation), nameof(Quotation.TotalAmount)));
-        Assert.Equal(expected, ColumnType(model, typeof(Quotation), nameof(Quotation.TotalAmountCny)));
-        Assert.Equal(expected, ColumnType(model, typeof(Quotation), nameof(Quotation.ExchangeRate)));
+        Assert.Equal(amountType, ColumnType(model, typeof(QuotationDetail), nameof(QuotationDetail.Quantity)));
+        Assert.Equal(amountType, ColumnType(model, typeof(QuotationDetail), nameof(QuotationDetail.UnitPrice)));
+        Assert.Equal(amountType, ColumnType(model, typeof(QuotationDetail), nameof(QuotationDetail.Amount)));
+        Assert.Equal(amountType, ColumnType(model, typeof(Quotation), nameof(Quotation.TotalAmount)));
+        Assert.Equal(amountType, ColumnType(model, typeof(Quotation), nameof(Quotation.TotalAmountCny)));
+        Assert.Equal(rateType, ColumnType(model, typeof(Quotation), nameof(Quotation.ExchangeRate)));
     }
 
     // ==================== 3. 控制器：新增 / 修改（零写入、零占号） ====================
@@ -388,7 +406,7 @@ public class QuotationCommercialValidationTests
     {
         using var db = TestDbFactory.Create();
         SeedQuotationNumberRule(db);
-        var quotation = Seed(db, "QT-PI-BAD", DocumentStatus.Approved, Line(0.001m, 10m));
+        var quotation = Seed(db, "QT-PI-BAD", DocumentStatus.Approved, Line(-1m, 10m));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             NewController(db).ToProformaInvoice(quotation.Id));
