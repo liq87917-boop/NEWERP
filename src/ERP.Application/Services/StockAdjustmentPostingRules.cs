@@ -17,6 +17,11 @@ namespace ERP.Application.Services;
 /// （<c>SELECT ... WITH (UPDLOCK, HOLDLOCK)</c>），因此并发「审核 / 审核」或「审核 / 取消」不可能同时成功。
 /// 受影响的库存行按<b>确定性顺序</b>（仓库 Id 升序 → 商品 Id 升序，见
 /// <see cref="InventoryService.OrderStockIdentities"/>）加锁，不形成环形等待。</para>
+/// <para>ERP-507 补齐<b>数值边界护栏</b>（<see cref="EnsureLineShape"/>）：创建 / 修改在单号预约与任何写入之前，
+/// 校验每一行将被持久化的明细（含客户端 <c>IsDeleted=true</c>、服务端会强制恢复为正常的行）的账面 / 实盘数量与成本单价
+/// 在实际存储精度（<c>DECIMAL(18,4)</c> / <c>DECIMAL(18,6)</c>）内可表示，并用与
+/// <c>StockAdjustmentController.Normalize</c> 同源的 <see cref="ComputeSignedDifference"/> 复核有符号差异数量 / 金额
+/// 与表头合计（含乘法 / 求和溢出）；精度常量与 <c>ErpDbContext</c> 的 <c>HasPrecision</c> 声明同源。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>，不改单据、不改库存 / 流水、不改任何估值规则；
 /// 「判定 + 状态变更 + 库存写入」的原子性由调用方（<c>StockAdjustmentController</c>）在同一可串行化事务内完成。</para>
 /// </summary>
@@ -45,6 +50,72 @@ public static class StockAdjustmentPostingRules
         "本护栏只保护库存盘点单的状态流转与库存写入：不改变库存成本口径（移动加权平均 / 差异金额 = 差异数量 × 成本单价），" +
         "不改写商品、仓库主数据，不改写其它单据与历史库存流水，不做任何「自动更正历史记录」的写回，" +
         "不新增表 / 列 / 权限 / 菜单，也不删除任何历史证据；所有库存增减与冲销仍复用既有 InventoryService（ERP-009）记账并写流水。";
+
+    /// <summary>
+    /// 盘点数量 / 行差异数量 / 表头差异合计的实际存储精度：<c>DECIMAL(18,4)</c>（与 <c>ErpDbContext</c> 对
+    /// <see cref="StockAdjustmentDetail.BookQuantity"/> / <see cref="StockAdjustmentDetail.ActualQuantity"/> /
+    /// <see cref="StockAdjustmentDetail.DiffQuantity"/> / <see cref="StockAdjustmentDetail.DiffAmount"/> 与
+    /// <see cref="StockAdjustment.TotalDiffQuantity"/> / <see cref="StockAdjustment.TotalDiffAmount"/> 的显式
+    /// 精度声明、以及 <c>SchemaUpgrader</c> 的建表脚本同源）。
+    /// <para>校验必须使用**同一份**精度口径：否则超精度值会被 SQL 静默取整 / 截断，或与明细合计出现落库差。</para>
+    /// </summary>
+    public const int QuantityPrecision = 18;
+
+    /// <summary>盘点数量 / 行差异数量 / 表头差异合计的实际小数位：4（与 <see cref="QuantityPrecision"/> 同源）。</summary>
+    public const int QuantityScale = 4;
+
+    /// <summary><c>DECIMAL(18,4)</c> 的最大可表示绝对值（14 位整数 + 4 位小数）。</summary>
+    public const decimal MaxDecimal18Scale4 = 99_999_999_999_999.9999m;
+
+    /// <summary>盘点成本单价的实际存储精度：<c>DECIMAL(18,6)</c>（与 <c>ErpDbContext</c> 显式声明同源）。</summary>
+    public const int CostPrecision = 18;
+
+    /// <summary>盘点成本单价的实际小数位：6（与 <see cref="CostPrecision"/> 同源）。</summary>
+    public const int CostScale = 6;
+
+    /// <summary><c>DECIMAL(18,6)</c> 的最大可表示绝对值（12 位整数 + 6 位小数）。</summary>
+    public const decimal MaxDecimal18Scale6 = 999_999_999_999.999999m;
+
+    /// <summary>盘点数量 / 差异数量是否在实际存储精度 <c>DECIMAL(18,4)</c> 内可表示（最多 4 位小数且绝对值有界）。</summary>
+    public static bool IsQuantityRepresentable(decimal value)
+        => decimal.Round(value, QuantityScale) == value
+           && value >= -MaxDecimal18Scale4 && value <= MaxDecimal18Scale4;
+
+    /// <summary>盘点成本单价是否在实际存储精度 <c>DECIMAL(18,6)</c> 内可表示（最多 6 位小数且绝对值有界）。</summary>
+    public static bool IsCostRepresentable(decimal value)
+        => decimal.Round(value, CostScale) == value
+           && value >= -MaxDecimal18Scale6 && value <= MaxDecimal18Scale6;
+
+    /// <summary>
+    /// ERP-507 数值边界口径文案（接口 / 文档同源）：创建 / 修改在<b>单号预约与任何表头 / 明细写入之前</b>
+    /// 校验<b>每一行将被持久化的明细</b>（账面 / 实盘数量非负且在 <c>DECIMAL(18,4)</c> 内可表示、成本单价非负且
+    /// 在 <c>DECIMAL(18,6)</c> 内可表示），并用与 <c>StockAdjustmentController.Normalize</c> <b>同源</b>的公式
+    /// 重算<b>有符号</b>差异数量（实盘 − 账面）与差异金额（差异数量 × 成本单价，按 <c>InventoryService.RoundAmount</c> 取整），
+    /// 校验每一行与表头合计（差异总数量 / 差异总金额）在实际存储精度内可表示（含乘法 / 求和溢出）。
+    /// <para>客户端 <c>IsDeleted</c> <b>不可能</b>隐藏坏行：服务端在持久化时把提交的每一行都强制为「正常」行，
+    /// 因此请求侧校验覆盖全部提交行；空草稿头（0 行明细）仍受支持，是否要求非空有效明细由既有审核承诺边界决定。
+    /// 被拒绝的请求零单号消耗，零表头 / 明细 / 库存 / 流水 / 状态变化，也绝不新增表 / 列 / 索引 / 菜单 / 权限。</para>
+    /// </summary>
+    public const string DraftGuardRuleText =
+        "库存盘点单创建 / 修改在单号预约与任何表头 / 明细写入之前执行统一数值边界护栏：" +
+        "每一行将被持久化的明细（含客户端提交 IsDeleted=true、服务端会强制恢复为正常的行）账面 / 实盘数量必须非负且在 DECIMAL(18,4) 内可表示、" +
+        "成本单价非负且在 DECIMAL(18,6) 内可表示，有符号差异数量（实盘 − 账面）与差异金额（差异数量 × 成本单价）及其表头合计（差异总数量 / 差异总金额）" +
+        "必须落在实际存储精度内（含乘法与求和溢出）；商品 Id 必须有效且同一商品不得重复，仓库与商品必须存在、未删除、已启用；" +
+        "空草稿头（0 行明细）仍受支持，被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水 / 状态变化。";
+
+    /// <summary>
+    /// 有符号差异数量与差异金额的**唯一**计算口径（与 <c>StockAdjustmentController.Normalize</c> 同源）：
+    /// <c>差异数量 = 实盘 − 账面</c>（保留正负号：正数 = 盘盈、负数 = 盘亏），
+    /// <c>差异金额 = 差异数量 × 成本单价</c>（复用 <see cref="InventoryService.RoundAmount"/> 的 4 位小数、AwayFromZero 取整口径）。
+    /// <para>护栏与控制器共用本方法，确保「校验的数值」与「落库的数值」逐分一致，不做任何静默取整 / 截断 / 绝对化。</para>
+    /// </summary>
+    public static (decimal DiffQuantity, decimal DiffAmount) ComputeSignedDifference(
+        decimal bookQuantity, decimal actualQuantity, decimal unitCost)
+    {
+        var diffQuantity = actualQuantity - bookQuantity;
+        var diffAmount = InventoryService.RoundAmount(diffQuantity * unitCost);
+        return (diffQuantity, diffAmount);
+    }
 
     /// <summary>
     /// 身份 / 账号状态 / 模块授权三重校验（fail closed）：缺失或非法身份按未认证拒绝，
@@ -100,31 +171,80 @@ public static class StockAdjustmentPostingRules
     }
 
     /// <summary>
-    /// 明细静态形状校验（不访问数据库）：商品 Id 必须有效、账面 / 实盘数量与成本单价不得为负数、
-    /// 同一商品不得在一张盘点单中重复出现。任一不满足即按参数非法拒绝，绝不进入任何库存写入。
+    /// 明细数值边界校验（不访问数据库）：校验<b>传入集合中的每一行</b>（调用方在创建 / 修改时传入全部提交行，
+    /// 服务端会把客户端 <c>IsDeleted=true</c> 的行也强制恢复为「正常」行并持久化，因此**不存在被隐藏跳过的行**）——
+    /// 商品 Id 必须有效、账面 / 实盘数量与成本单价不得为负数且必须在实际存储精度
+    /// （数量 <c>DECIMAL(18,4)</c> / 成本 <c>DECIMAL(18,6)</c>）内可表示、同一商品不得在同一张盘点单中重复出现；
+    /// 并用与 <c>StockAdjustmentController.Normalize</c> <b>同源</b>的公式重算有符号差异数量与差异金额，
+    /// 校验每一行与表头合计（差异总数量 / 差异总金额）在 <c>DECIMAL(18,4)</c> 内可表示（含乘法 / 求和溢出）。
+    /// 任一不满足即按参数非法拒绝，绝不进入任何库存写入、绝不静默取整 / 截断。
+    /// <para>零账面 / 零实盘与零成本都是合法值（保留盘盈 / 盘亏与「0 差异」语义）；空集合（空草稿头）同样合法。</para>
     /// </summary>
     public static void EnsureLineShape(IEnumerable<StockAdjustmentDetail> details)
     {
         ArgumentNullException.ThrowIfNull(details);
+        var rows = details as IReadOnlyList<StockAdjustmentDetail> ?? details.ToList();
 
         var productIds = new HashSet<long>();
         var line = 0;
-        foreach (var d in details.Where(d => !d.IsDeleted))
+        decimal totalQuantity = 0m, totalAmount = 0m;
+        try
         {
-            line++;
-            var label = string.IsNullOrWhiteSpace(d.ProductName) ? $"第 {line} 行" : d.ProductName;
+            foreach (var d in rows)
+            {
+                line++;
+                var label = string.IsNullOrWhiteSpace(d.ProductName) ? $"第 {line} 行" : d.ProductName;
 
-            if (d.ProductId is null or <= 0)
-                throw BusinessException.InvalidParameter($"盘点明细 [{label}] 缺少有效商品 Id，无法盘点");
-            if (d.BookQuantity < 0)
-                throw BusinessException.InvalidParameter($"商品 [{label}] 的账面数量不能为负数");
-            if (d.ActualQuantity < 0)
-                throw BusinessException.InvalidParameter($"商品 [{label}] 的实盘数量不能为负数");
-            if (d.UnitCost < 0)
-                throw BusinessException.InvalidParameter($"商品 [{label}] 的成本单价不能为负数");
-            if (!productIds.Add(d.ProductId.Value))
-                throw BusinessException.InvalidParameter($"商品 [{label}] 在同一张盘点单中重复出现，请合并为一行");
+                if (d.ProductId is null or <= 0)
+                    throw BusinessException.InvalidParameter($"盘点明细 [{label}] 缺少有效商品 Id，无法盘点");
+                if (d.BookQuantity < 0)
+                    throw BusinessException.InvalidParameter($"商品 [{label}] 的账面数量不能为负数");
+                if (!IsQuantityRepresentable(d.BookQuantity))
+                    throw BusinessException.InvalidParameter(
+                        $"商品 [{label}] 的账面数量 {d.BookQuantity} 超出存储精度（DECIMAL(18,4) / 4 位小数）：已拒绝，绝不静默截断或取整");
+                if (d.ActualQuantity < 0)
+                    throw BusinessException.InvalidParameter($"商品 [{label}] 的实盘数量不能为负数");
+                if (!IsQuantityRepresentable(d.ActualQuantity))
+                    throw BusinessException.InvalidParameter(
+                        $"商品 [{label}] 的实盘数量 {d.ActualQuantity} 超出存储精度（DECIMAL(18,4) / 4 位小数）：已拒绝，绝不静默截断或取整");
+                if (d.UnitCost < 0)
+                    throw BusinessException.InvalidParameter($"商品 [{label}] 的成本单价不能为负数");
+                if (!IsCostRepresentable(d.UnitCost))
+                    throw BusinessException.InvalidParameter(
+                        $"商品 [{label}] 的成本单价 {d.UnitCost} 超出存储精度（DECIMAL(18,6) / 6 位小数）：已拒绝，绝不静默截断或取整");
+                if (!productIds.Add(d.ProductId.Value))
+                    throw BusinessException.InvalidParameter($"商品 [{label}] 在同一张盘点单中重复出现，请合并为一行");
+
+                // 有符号差异：与 Normalize 同源重算，任一不可表示即拒绝（含 差异数量 × 成本单价 的乘法溢出）。
+                var (diffQuantity, diffAmount) = ComputeSignedDifference(d.BookQuantity, d.ActualQuantity, d.UnitCost);
+                if (!IsQuantityRepresentable(diffQuantity))
+                    throw BusinessException.InvalidParameter(
+                        $"商品 [{label}] 的差异数量 {diffQuantity} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+                if (!IsQuantityRepresentable(diffAmount))
+                    throw BusinessException.InvalidParameter(
+                        $"商品 [{label}] 的差异金额 {diffAmount} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+
+                totalQuantity += diffQuantity;
+                totalAmount += diffAmount;
+            }
+
+            AssertTotalRepresentable("差异总数量", totalQuantity);
+            AssertTotalRepresentable("差异总金额", InventoryService.RoundAmount(totalAmount));
         }
+        catch (OverflowException)
+        {
+            // decimal 乘法 / 加法溢出：转换为受控业务错误，绝不落库为截断值。
+            throw BusinessException.InvalidParameter(
+                "盘点数量 / 成本 / 差异金额超出可存储范围（DECIMAL(18,4) / DECIMAL(18,6)）：已拒绝，绝不静默截断或取整");
+        }
+    }
+
+    /// <summary>表头合计（差异总数量 / 差异总金额）的实际存储精度校验（与 <c>Normalize</c> 同源口径）。</summary>
+    private static void AssertTotalRepresentable(string name, decimal value)
+    {
+        if (!IsQuantityRepresentable(value))
+            throw BusinessException.InvalidParameter(
+                $"盘点单{name} {value} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
     }
 
     /// <summary>

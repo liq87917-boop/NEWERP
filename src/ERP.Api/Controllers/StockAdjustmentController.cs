@@ -20,6 +20,10 @@ namespace ERP.Api.Controllers;
 ///    要求操作员在待提交状态重新盘点 / 修改，绝不用客户端账面差额静默过账出虚构差异；
 ///    审核 / 销审 / 取消 / 提交 / 删除 / 修改共用同一把盘点单行锁（UPDLOCK/HOLDLOCK），
 ///    受影响库存行按确定性顺序（仓库 Id 升序 → 商品 Id 升序）加锁，全部写入包在同一可串行化事务内。
+/// 6) ERP-507 数值边界：创建 / 修改在<b>单号预约与任何表头 / 明细写入之前</b>校验每一行将被持久化的明细
+///    （账面 / 实盘数量、成本单价非负且在实际存储精度 DECIMAL(18,4) / DECIMAL(18,6) 内可表示，有符号差异
+///    数量 / 金额与表头合计可表示、含乘法与求和溢出）；服务端把每一行都强制为「正常」行，
+///    客户端 <c>IsDeleted</c> 绝不可能隐藏坏行；提交 / 审核在既有锁内复核当前生效的已存值。
 /// </summary>
 [Route("api/inventory/stock-adjustments")]
 public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
@@ -143,20 +147,28 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
     }
 
     /// <summary>创建（单号由字轨生成；差异数量与差异金额由后端复核）</summary>
+    /// <remarks>ERP-507：数值边界护栏（明细形状 / 实际存储精度 / 有符号差异与合计）先于单号预约与任何写入；
+    /// 服务端把每一行都强制为「正常」行，客户端 <c>IsDeleted</c> 绝不可能隐藏坏行。被拒绝方绝不消耗单号、绝不落库。</remarks>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockAdjustment entity)
     {
         // 授权先于单号生成：被拒绝方绝不消耗单据号
         await AuthorizeAsync();
         entity.Id = 0;
+        entity.Details ??= new List<StockAdjustmentDetail>();
+
+        // ERP-507：服务端权威覆盖明细身份 / 删除态（客户端 IsDeleted 不能隐藏坏行），再在单号预约与任何写入之前
+        // 校验数值边界（非负且可表示的账面 / 实盘数量与成本、有符号差异数量 / 金额与表头合计）。
+        ApplyServerOwnedDetailIdentity(entity.Details);
+        StockAdjustmentPostingRules.EnsureLineShape(entity.Details);
+        await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, entity.Details);
+
         if (string.IsNullOrWhiteSpace(entity.AdjustmentNo))
             entity.AdjustmentNo = await _noService.GenerateAsync(DocumentType.StockAdjustment);
         entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
         entity.CreatedAt = DateTime.Now;
-        StockAdjustmentPostingRules.EnsureLineShape(entity.Details);
-        await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, entity.Details);
         entity.WarehouseName = await ResolveWarehouseNameAsync(entity.WarehouseId, entity.WarehouseName);
-        ResetDetailIds(entity);
         Normalize(entity);
         Db.StockAdjustments.Add(entity);
         await Db.SaveChangesAsync();
@@ -164,6 +176,8 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
     }
 
     /// <summary>修改（仅待提交可改；明细整体替换）</summary>
+    /// <remarks>ERP-507：数值边界护栏先于任何已跟踪表头 / 明细变更；明细身份与删除态由服务端权威覆盖，
+    /// 客户端 <c>IsDeleted</c> 绝不可能隐藏坏行。被拒绝方既有单据与明细逐字段不变、不消耗新单号。</remarks>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] StockAdjustment entity)
     {
@@ -180,6 +194,11 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
             if (GetStatus(existing) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("仅待提交状态的单据可修改（已审核请先销审）");
 
+            entity.Details ??= new List<StockAdjustmentDetail>();
+
+            // ERP-507：先强制每一行为「正常」行（客户端 IsDeleted 不能隐藏坏行），再在改写已跟踪表头 / 明细之前
+            // 校验数值边界（非负且可表示的账面 / 实盘数量与成本、有符号差异数量 / 金额与表头合计）。
+            ApplyServerOwnedDetailIdentity(entity.Details);
             StockAdjustmentPostingRules.EnsureLineShape(entity.Details);
             await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, entity.Details);
 
@@ -192,7 +211,6 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
             Db.StockAdjustmentDetails.RemoveRange(existing.Details);
             entity.AdjustmentNo = existing.AdjustmentNo;
             entity.Id = id;
-            ResetDetailIds(entity);
             Normalize(entity);
             existing.Details = entity.Details;
             existing.TotalDiffQuantity = entity.TotalDiffQuantity;
@@ -358,6 +376,9 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
     }
 
     /// <summary>提交（仅待提交可提交；与审核 / 销审 / 取消共用同一把单据行锁）</summary>
+    /// <remarks>ERP-507：提交在锁内复核**当前生效**的已存明细（数值边界 / 实际存储精度 / 在用主数据），
+    /// 任一不满足即拒绝且状态保持「待提交」（零状态变化、零库存 / 流水）。空草稿头仍可提交，
+    /// 是否要求非空有效明细由既有审核承诺边界决定。</remarks>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
@@ -368,11 +389,17 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
                 throw BusinessException.NotFound("盘点单不存在");
             await AuthorizeAsync();
 
-            var entity = await Db.StockAdjustments
+            var entity = await Db.StockAdjustments.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("盘点单不存在");
             if (GetStatus(entity) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            // ERP-507：提交是承诺边界之一 —— 当前生效明细的数值边界 / 实际存储精度 / 在用主数据必须仍然成立，
+            // 任一不满足即拒绝且状态保持「待提交」（零状态变化、零库存 / 流水）。
+            var details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
+            StockAdjustmentPostingRules.EnsureLineShape(details);
+            await StockAdjustmentPostingRules.EnsureLiveMasterDataAsync(Db, entity.WarehouseId, details);
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
@@ -426,7 +453,9 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
             : fallback;
 
     /// <summary>行号 / 差异数量 / 差异金额 / 合计统一整理（后端复核，防止前端篡改）</summary>
-    /// <remarks>只做「计算」，不动明细主键：审核时明细是已跟踪的实体，重置主键会触发 EF 的 key 修改异常。</remarks>
+    /// <remarks>只做「计算」，不动明细主键：审核时明细是已跟踪的实体，重置主键会触发 EF 的 key 修改异常。
+    /// ERP-507：差异数量 / 差异金额改用 <see cref="StockAdjustmentPostingRules.ComputeSignedDifference"/>（与护栏同源），
+    /// 保留正负号（盘盈为正、盘亏为负）与 4 位小数取整口径，绝不做绝对化或静默取整。</remarks>
     private static void Normalize(StockAdjustment entity)
     {
         if (entity.AdjustmentDate == default) entity.AdjustmentDate = DateTime.Today;
@@ -437,19 +466,29 @@ public class StockAdjustmentController : DocumentControllerBase<StockAdjustment>
             d.StockAdjustmentId = entity.Id;
             d.AdjustmentNo = entity.AdjustmentNo;
             d.SortNo = ++line;
-            d.DiffQuantity = d.ActualQuantity - d.BookQuantity;
-            d.DiffAmount = InventoryService.RoundAmount(d.DiffQuantity * d.UnitCost);
-            totalQuantity += d.DiffQuantity;
-            totalAmount += d.DiffAmount;
+            var (diffQuantity, diffAmount) = StockAdjustmentPostingRules.ComputeSignedDifference(
+                d.BookQuantity, d.ActualQuantity, d.UnitCost);
+            d.DiffQuantity = diffQuantity;
+            d.DiffAmount = diffAmount;
+            totalQuantity += diffQuantity;
+            totalAmount += diffAmount;
         }
         entity.TotalDiffQuantity = totalQuantity;
         entity.TotalDiffAmount = InventoryService.RoundAmount(totalAmount);
     }
 
-    /// <summary>明细整体替换时强制作为新行插入（请求体可能带回历史明细 Id，直接保存会被 EF 当成已存在行）</summary>
-    private static void ResetDetailIds(StockAdjustment entity)
+    /// <summary>
+    /// ERP-507：明细身份 / 归属单据 / 删除态一律由服务端权威覆盖 —— 明细主键一律置 0（自增，请求体可能带回历史
+    /// 明细 Id，直接保存会被 EF 当成已存在行）、删除态强制为「正常」（客户端 <c>IsDeleted</c> 不可能隐藏坏行后被
+    /// 重新启用）。归属单据 / 单号由 <see cref="Normalize"/> 按服务端已知值回填。绝不采信客户端注入的明细身份 / 删除态。
+    /// </summary>
+    private static void ApplyServerOwnedDetailIdentity(IEnumerable<StockAdjustmentDetail> details)
     {
-        foreach (var d in entity.Details) d.Id = 0;
+        foreach (var d in details)
+        {
+            d.Id = 0;
+            d.IsDeleted = false;
+        }
     }
 }
 
