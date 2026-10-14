@@ -17,8 +17,9 @@ namespace ERP.Application.Services;
 /// 重复请求一律拒绝（不静默合并、不覆盖）；作废记录保留并可读，但不占用身份；</item>
 /// <item><b>关联（分摊）</b>（<see cref="PreviewAllocationsAsync"/> / <see cref="SaveAllocationsAsync"/>）：
 /// 只能关联到既有、未删除、未取消且**供应商与币种一致**的采购订单，同一订单不重复、合计不超过含税总额；</item>
-/// <item><b>登记 / 作废</b>（<see cref="RecordAsync"/> / <see cref="VoidAsync"/>）：登记冻结证据，
-/// 作废保留身份 / 金额 / 关联 / 审计历史，不物理删除、不静默改写；</item>
+/// <item><b>登记 / 作废</b>（<see cref="RecordAsync"/> / <see cref="VoidAsync"/>）：登记在既有采购订单 / 发票行锁内
+/// 复核已持久化金额（实际存储精度 <c>DECIMAL(18,2)</c>、币种取整与金额等式）与关联证据后冻结，
+/// 作废保留身份 / 金额 / 关联 / 审计历史，不物理删除、不静默改写（ERP-510）；</item>
 /// <item><b>台账读取</b>（<see cref="ListAsync"/> / <see cref="GetAsync"/> / <see cref="ListOrderCandidatesAsync"/>）：
 /// 分页 / 有界、批量装载关联行与订单，无逐行数据库查询。</item>
 /// </list>
@@ -500,9 +501,12 @@ public static class PurchaseInvoiceService
     // ==================== 4. 登记 / 作废（证据冻结与保留） ====================
 
     /// <summary>
-    /// 登记草稿发票（草稿 → 已登记）：登记前**复核**已持久化关联行仍可权威关联
+    /// 登记草稿发票（草稿 → 已登记）：登记前**复核**已持久化金额仍满足实际存储精度（<c>DECIMAL(18,2)</c>）、
+    /// 币种取整与金额等式，并复核已持久化关联行仍可权威关联
     /// （订单未删除 / 未取消、供应商与币种一致、合计不超过含税总额），通过后只改发票状态与登记时间。
-    /// <para>登记<strong>不</strong>改动采购订单、库存、退税、供应商余额与付款状态，也不生成任何财务单据。</para>
+    /// <para>登记**不**改动采购订单、库存、退税、供应商余额与付款状态，也不生成任何财务单据。</para>
+    /// <para>ERP-510：金额与关联复核都在既有采购订单 / 发票行锁内、改状态之前完成；不一致的已持久化金额被受控拒绝，
+    /// 绝不静默改写任何已存储历史值，被拒调用不改变单号 / 发票 / 关联 / 来源 / 状态 / 审计。</para>
     /// </summary>
     public static async Task<PurchaseInvoiceDto> RecordAsync(IErpDbContext db, long invoiceId)
     {
@@ -525,6 +529,10 @@ public static class PurchaseInvoiceService
 
         var invoice = await LoadAsync(db, invoiceId);
         PurchaseInvoiceRules.EnsureRecordable(invoice.Status, IdentityOf(invoice));
+
+        // ERP-510：锁内复核已持久化金额（只读、不取整、不改写），不一致即拒绝且状态 / 字段 / 审计不变。
+        PurchaseInvoiceRules.EnsurePersistedAmountsConsistent(
+            invoice.NetAmount, invoice.TaxAmount, invoice.GrossAmount, invoice.Currency, IdentityOf(invoice));
 
         await RevalidatePersistedAllocationsAsync(db, invoice);
 

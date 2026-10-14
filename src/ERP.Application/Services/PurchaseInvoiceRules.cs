@@ -9,6 +9,7 @@ namespace ERP.Application.Services;
 /// 供应商采购发票登记的纯规则（ERP-043，无数据库依赖，便于逐条单测）：
 /// 发票类型（普票 / 专票 / 进口）与发票代码要求、发票号码 / 身份规范化、供应商可用性、
 /// 到期日与付款条件（ERP-065：可选、显式、缺失即未知）、金额等式与币种精度、
+/// 标量金额列实际存储精度（<c>DECIMAL(18,2)</c>，ERP-510）与登记前的已持久化金额只读复核、
 /// 状态机（草稿 → 已登记 → 已作废）、关联状态与文案，
 /// 以及「采购订单能否被本发票关联」的权威资格判定（供应商 + 币种一致、非取消）。
 /// <para>边界：本规则只做**校验与计算**，不写库、不改写采购订单 / 库存 / 退税 / 付款 / 供应商数据，
@@ -77,7 +78,9 @@ public static class PurchaseInvoiceRules
     public const string AmountEquationText =
         "金额等式（服务端权威校验）：含税总额（价税合计）= 不含税金额（净额）+ 税额；"
         + "三项均按币种精度四舍五入（JPY / KRW / VND / IDR 为 0 位小数，其余 2 位，0.5 进位）后必须严格相等，"
-        + "且含税总额必须大于 0、税额不得为负；系统不按税率反推金额、不做汇率换算、不跨币种合并。";
+        + "且含税总额必须大于 0、税额不得为负；系统不按税率反推金额、不做汇率换算、不跨币种合并；"
+        + "三项作为**单个标量**还必须落在金额列实际存储精度 DECIMAL(18,2) 内"
+        + "（超出即拒绝，绝不静默截断或取整，也不限制只读聚合合计）。";
 
     /// <summary>关联口径文案（接口、界面与文档同源）</summary>
     public const string LinkageRuleText =
@@ -248,8 +251,13 @@ public static class PurchaseInvoiceRules
     // ==================== 2. 金额等式与币种精度 ====================
 
     /// <summary>
-    /// 金额等式校验（服务端权威）：三项均为原币且不得为负；按币种精度取整后必须满足
-    /// <c>含税总额 = 不含税金额 + 税额</c> 且含税总额大于 0；返回取整后的三元组（写入即取整值）。
+    /// 金额等式校验（服务端权威）：三项均为原币且不得为负；按币种精度取整后，每一项作为**单个标量**必须落在
+    /// 金额列实际存储精度（<c>DECIMAL(18,2)</c>，见 <see cref="FinancePersistedAmountRules"/>）内，且必须满足
+    /// <c>含税总额 = 不含税金额 + 税额</c> 与含税总额大于 0；返回取整后的三元组（写入即取整值）。
+    /// <para>ERP-510：存储边界判定**先于**等式与差额计算 —— 极大正金额（含「取整进位后越过单列上限」、
+    /// 恰好合法但三项之和会溢出 CLR 的情形）在计算 <c>净额 + 税额</c> 与差额之前就被受控拒绝，
+    /// 绝不静默截断 / 取整，也不会以 <see cref="OverflowException"/> 崩溃；
+    /// 币种取整口径（含零小数币种与 <c>AwayFromZero</c>）与「零税额 / 零净额」既有语义原样保留。</para>
     /// </summary>
     public static (decimal Net, decimal Tax, decimal Gross) ValidateAmounts(
         decimal netAmount, decimal taxAmount, decimal grossAmount, string? currency)
@@ -263,6 +271,11 @@ public static class PurchaseInvoiceRules
         var gross = CurrencyAmountRules.RoundAmount(grossAmount, currency);
         var normalized = CurrencyAmountRules.NormalizeCurrency(currency);
 
+        // ERP-510：先收敛每个标量到实际存储精度，再计算等式与差额（避免 CLR 溢出与 SQL 截断）。
+        FinancePersistedAmountRules.EnsureRepresentable(net, "不含税金额按币种精度取整后");
+        FinancePersistedAmountRules.EnsureRepresentable(tax, "税额按币种精度取整后");
+        FinancePersistedAmountRules.EnsureRepresentable(gross, "含税总额按币种精度取整后");
+
         if (gross <= 0)
             throw BusinessException.InvalidParameter(
                 $"含税总额必须大于 0（当前按 {normalized} 精度取整后为 {gross}）");
@@ -275,7 +288,10 @@ public static class PurchaseInvoiceRules
         return (net, tax, gross);
     }
 
-    /// <summary>单个关联金额规范化（按币种精度取整；必须大于 0）</summary>
+    /// <summary>
+    /// 单个关联金额规范化（按币种精度取整；必须大于 0；取整后的**标量**必须落在金额列实际存储精度
+    /// <c>DECIMAL(18,2)</c> 内，超出即受控拒绝，绝不静默截断 / 取整）。
+    /// </summary>
     public static decimal NormalizeAllocationAmount(decimal amount, string? currency)
     {
         if (amount < 0)
@@ -285,7 +301,52 @@ public static class PurchaseInvoiceRules
         if (rounded <= 0)
             throw BusinessException.InvalidParameter(
                 $"关联金额必须大于 0（当前 {amount}，按 {CurrencyAmountRules.NormalizeCurrency(currency)} 精度取整后为 {rounded}）");
-        return rounded;
+        return FinancePersistedAmountRules.EnsureRepresentable(rounded, "关联金额按币种精度取整后");
+    }
+
+    /// <summary>
+    /// 登记前对**已持久化**发票金额的只读一致性复核（ERP-510）：不含税金额 / 税额 / 含税总额必须非负、
+    /// 已在金额列实际存储精度（<c>DECIMAL(18,2)</c>）内可**原样**表示、已按币种精度取整，
+    /// 且严格满足 <c>含税总额 = 不含税金额 + 税额</c>（含税总额大于 0）。
+    /// <para>本方法**只判定、不取整、不改写**任何已存储值：不一致时按业务规则冲突受控拒绝，
+    /// 绝不用登记动作把历史金额「修复」成另一个值（更正必须走显式作废 / 重新登记）。
+    /// 存储边界与币种取整判定先于差额计算，因此不会以 <see cref="OverflowException"/> 崩溃。</para>
+    /// </summary>
+    public static void EnsurePersistedAmountsConsistent(
+        decimal netAmount, decimal taxAmount, decimal grossAmount, string? currency, string identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        var normalized = CurrencyAmountRules.NormalizeCurrency(currency);
+
+        if (netAmount < 0 || taxAmount < 0 || grossAmount < 0)
+            throw BusinessException.RuleConflict(
+                $"发票「{identity}」的已持久化金额为负数：不含税金额 {netAmount} / 税额 {taxAmount} / 含税总额 {grossAmount}："
+                + "不能登记（不静默改写已存储值，如需更正请显式作废后重新登记）");
+
+        if (!FinancePersistedAmountRules.IsRepresentable(netAmount)
+            || !FinancePersistedAmountRules.IsRepresentable(taxAmount)
+            || !FinancePersistedAmountRules.IsRepresentable(grossAmount))
+            throw BusinessException.RuleConflict(
+                $"发票「{identity}」的已持久化金额超出可存储范围（DECIMAL(18,2)）："
+                + $"不含税金额 {netAmount} / 税额 {taxAmount} / 含税总额 {grossAmount}："
+                + "不能登记（绝不静默截断或取整已存储值，如需更正请显式作废后重新登记）");
+
+        if (CurrencyAmountRules.RoundAmount(netAmount, currency) != netAmount
+            || CurrencyAmountRules.RoundAmount(taxAmount, currency) != taxAmount
+            || CurrencyAmountRules.RoundAmount(grossAmount, currency) != grossAmount)
+            throw BusinessException.RuleConflict(
+                $"发票「{identity}」的已持久化金额未按币种 {normalized} 精度取整："
+                + $"不含税金额 {netAmount} / 税额 {taxAmount} / 含税总额 {grossAmount}："
+                + "不能登记（不静默改写已存储值）");
+
+        if (grossAmount <= 0)
+            throw BusinessException.RuleConflict(
+                $"发票「{identity}」的已持久化含税总额必须大于 0（当前 {grossAmount}）：不能登记");
+
+        if (grossAmount != netAmount + taxAmount)
+            throw BusinessException.RuleConflict(
+                $"发票「{identity}」的已持久化金额等式不成立：含税总额 {grossAmount} ≠ 不含税金额 {netAmount} + 税额 {taxAmount}"
+                + $"（差额 {grossAmount - netAmount - taxAmount} {normalized}）：不能登记（不静默改写已存储值）");
     }
 
     // ==================== 3. 状态机与文案 ====================
