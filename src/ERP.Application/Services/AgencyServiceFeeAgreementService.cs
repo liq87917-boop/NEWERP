@@ -226,6 +226,10 @@ public static class AgencyServiceFeeAgreementService
     /// <summary>
     /// 登记草稿协议证据（草稿 → 已登记）：只改状态、登记时间与登记人（按已认证身份写入），
     /// 冻结条款与客户快照；<strong>不</strong>开发票、不记账、不授权付款、不改写任何既有记录。
+    /// <para>ERP-516：冻结状态与审计字段**之前**，先调用
+    /// <see cref="AgencyServiceFeeAgreementRules.EnsureStoredFeeTermsConsistent"/> 只读复核**已持久化**费用条款
+    /// 仍按权威口径原样可存储（计费方式互斥 / 费率 (0,100] 且 4 位小数 / 固定金额按币种精度取整后 &gt; 0 且可在
+    /// <c>DECIMAL(18,2)</c> 内原样存储）；不一致即受控拒绝，协议、来源引用与审计逐字段不变。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeAgreementDto> RecordAsync(
         IErpDbContext db, long agreementId, string? recordedBy)
@@ -233,6 +237,10 @@ public static class AgencyServiceFeeAgreementService
         ArgumentNullException.ThrowIfNull(db);
         var agreement = await LoadAsync(db, agreementId);
         AgencyServiceFeeAgreementRules.EnsureRecordable(agreement.Status, IdentityOf(agreement));
+        // ERP-516：登记**冻结状态与审计字段之前**，只读复核已持久化的费用条款仍按权威口径原样可存储
+        // （计费方式互斥 / 费率 (0,100] 且 4 位小数 / 固定金额按币种精度取整后 > 0 且可在 DECIMAL(18,2) 内原样存储）；
+        // 不一致即受控拒绝，协议、来源引用与审计逐字段不变，绝不静默取整 / 回填历史。
+        AgencyServiceFeeAgreementRules.EnsureStoredFeeTermsConsistent(agreement);
 
         agreement.Status = AgencyServiceFeeAgreementRules.StatusRecorded;
         agreement.RecordedAt = DateTime.Now;

@@ -84,6 +84,8 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// <summary>
     /// 登记协议证据（草稿 → 已登记）：只改状态、登记时间与登记人（服务端按已认证身份写入，客户端不能提交该字段），
     /// <strong>不</strong>开发票、<strong>不</strong>记账、<strong>不</strong>授权或发起付款，也不改写任何既有记录。
+    /// <para>ERP-516：冻结状态与审计字段之前先只读复核已持久化费用条款（固定金额必须可在 <c>DECIMAL(18,2)</c> 内
+    /// 原样存储、费率必须 (0,100] 且 4 位小数、两种口径互斥）；不一致时受控拒绝且协议 / 审计零变更。</para>
     /// </summary>
     [HttpPost("{id:long}/record")]
     public async Task<IActionResult> Record(long id)

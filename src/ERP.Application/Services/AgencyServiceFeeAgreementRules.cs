@@ -69,7 +69,8 @@ public static class AgencyServiceFeeAgreementRules
     /// <summary>费用条款口径文案</summary>
     public const string FeeTermsRuleText =
         "费用条款口径（服务端权威校验）：费率 / 固定金额 / 计费依据说明都只来自授权用户**显式提交**的值 —— "
-        + "比例费率必须填写大于 0 且不超过 100 的费率（保留 4 位小数，0.5 进位），固定金额必须按币种精度取整后大于 0；"
+        + "比例费率必须填写大于 0 且不超过 100 的费率（保留 4 位小数，0.5 进位），"
+        + "固定金额必须按币种精度取整后大于 0 且可在实际金额列 DECIMAL(18,2) 内原样存储（超出即拒绝，绝不静默截断或取整）；"
         + "两种口径不得同时填写，不兼容组合一律拒绝且不做静默归一化；系统不会从业务员提成设置（SalesCommissionRate）、"
         + "客户 / 供应商主数据比例、历史订单、自由文本、客户默认值或金额相似度推断任何条款，也不做汇率换算。";
 
@@ -256,7 +257,52 @@ public static class AgencyServiceFeeAgreementRules
             throw BusinessException.InvalidParameter(
                 $"固定金额必须大于 0（当前 {amount}，按 {cur} 精度取整后为 {roundedAmount}）");
 
-        return (0m, roundedAmount);
+        // ERP-516：固定金额列实际存储精度为 DECIMAL(18,2)（见 ErpDbContext 显式 HasPrecision(18,2)），
+        // 币种取整之后必须复用既有标量守卫追加实际存储边界判定：极大正金额（1e16、
+        // 9_999_999_999_999_999.995 取整进位后的 1e16、decimal.MaxValue）能通过「大于 0」却会在写入时截断 / 溢出，
+        // 因此必须在落库之前受控拒绝，绝不静默截断或取整。
+        return (0m, FinancePersistedAmountRules.EnsureRepresentable(roundedAmount, FixedAmountLabel));
+    }
+
+    /// <summary>
+    /// 固定金额标量在**币种精度取整之后**的错误文案前缀（接口 / 界面 / 文档同源）。
+    /// </summary>
+    public const string FixedAmountLabel = "固定金额按币种精度取整后";
+
+    /// <summary>
+    /// 已持久化费用条款无法与权威口径逐字复现时的受控错误文案（登记前只读复核；接口 / 文档同源）。
+    /// </summary>
+    public const string StoredFeeTermsInconsistentText =
+        "已持久化费用条款与权威口径不一致（不可原样存储或精度不符）：已拒绝登记，协议保持草稿且审计不变"
+        + "（系统绝不静默取整 / 截断，也不回填或改写历史快照）";
+
+    /// <summary>
+    /// 登记前的**只读**持久化费用条款复核：把已落库的计费方式与费率 / 固定金额重新过一遍与新增 / 修改
+    /// **完全相同**的权威口径（<see cref="ValidateFeeTerms"/>）：
+    /// <list type="number">
+    /// <item>计费方式必须显式且受支持，两种口径互斥（比例费率时固定金额必须为 0，固定金额时费率必须为 0）；</item>
+    /// <item>比例费率必须落在 (0, <see cref="MaxRatePercent"/>] 且可被 <c>DECIMAL(9,4)</c> 原样存储（4 位小数）；</item>
+    /// <item>固定金额必须按**已持久化币种**精度取整后大于 0，且可在实际金额列 <c>DECIMAL(18,2)</c> 内原样存储。</item>
+    /// </list>
+    /// <para>只读：不写库、不改状态 / 登记人 / 时间戳，也不新增授权或菜单口径；调用方（登记）在冻结状态与审计字段
+    /// **之前**调用，失败时协议、来源引用与审计逐字段不变。历史读取 / 作废 / 取消语义与既有撤销路径**不调用**本方法，
+    /// 也不做任何回填。货币 / 客户 / 生效日期与唯一身份仍由既有生命周期规则把关，本方法只复核费用条款存储口径。</para>
+    /// </summary>
+    public static void EnsureStoredFeeTermsConsistent(AgencyServiceFeeAgreement agreement)
+    {
+        ArgumentNullException.ThrowIfNull(agreement);
+
+        var method = NormalizeFeeMethod(agreement.FeeMethod);
+        var currency = CurrencyAmountRules.NormalizeCurrency(agreement.Currency);
+        var (rate, fixedAmount) = ValidateFeeTerms(
+            method, agreement.RatePercent, agreement.FixedAmount, currency);
+
+        // 存储值与「按权威口径重新计算」的结果必须逐字相等：费率不足 4 位小数（或固定金额不足币种精度 /
+        // 超出 DECIMAL(18,2)）的存量行无法原样复现登记当时的条款，登记前受控拒绝而不是静默取整。
+        if (rate != agreement.RatePercent || fixedAmount != agreement.FixedAmount)
+            throw BusinessException.InvalidParameter(
+                $"{StoredFeeTermsInconsistentText}（{IdentityText(agreement.AgreementNo)}："
+                + $"{FeeTermsText(method, agreement.RatePercent, agreement.FixedAmount, currency)}）");
     }
 
     /// <summary>费用条款文案（只读展示：显式展示计费方式、条款值与币种口径）</summary>
