@@ -22,7 +22,7 @@ public class StockInControllerTests
     public async Task Create_正常创建_汇总TotalQuantity_Weight_Volume_Status_Pending()
     {
         using var db = TestDbFactory.Create();
-        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
+        var ctl = NewController(db);
 
         var stockIn = new StockIn
         {
@@ -52,7 +52,7 @@ public class StockInControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
+        var ctl = NewController(db);
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
 
@@ -64,7 +64,7 @@ public class StockInControllerTests
     public async Task Create_空串入库单号与伪造身份_服务端权威覆盖()
     {
         using var db = TestDbFactory.Create();
-        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
+        var ctl = NewController(db);
 
         var stockIn = new StockIn
         {
@@ -133,8 +133,26 @@ public class StockInControllerTests
         Assert.True(db.StockIns.Single().IsDeleted);
     }
 
+    /// <summary>
+    /// ERP-504：创建 / 提交 / 审核要求明细商品真实在用 —— 统一播种夹具主数据（供应商 / 仓库由既有脚手架播种，
+    /// 不新增任何授权或业务断言）。
+    /// </summary>
+    private static StockInController NewController(ErpDbContext db)
+    {
+        EnsureProducts(db);
+        return StockInLegacyTestFixture.Create(db, 999999L, 999999L);
+    }
+
+    /// <summary>ERP-504：幂等播种本夹具明细使用的在用商品（存在、未删除、已启用）。</summary>
+    private static void EnsureProducts(ErpDbContext db)
+    {
+        StockInTestAuthorization.SeedProduct(db, 1L, name: "P1");
+        StockInTestAuthorization.SeedProduct(db, 2L, name: "P2");
+    }
+
     private static (StockIn si, StockInDetail detail) SeedStockIn(ErpDbContext db, string no, DocumentStatus status)
     {
+        EnsureProducts(db);
         var si = new StockIn
         {
             StockInNo = no,

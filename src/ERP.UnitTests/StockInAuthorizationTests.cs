@@ -71,6 +71,33 @@ public static class StockInTestAuthorization
         return warehouse;
     }
 
+    /// <summary>
+    /// ERP-504：播种真实可用商品（存在、未删除、已启用；幂等）。
+    /// 创建 / 修改的草稿护栏要求明细商品真实在用，既有夹具据此补齐主数据（不新增任何授权与业务断言）。
+    /// </summary>
+    public static BaseProduct SeedProduct(ErpDbContext db, long id, string unit = "PCS",
+        string packageUnit = "", int unitsPerPackage = 0, string name = "测试商品")
+    {
+        var existing = db.BaseProducts.FirstOrDefault(p => p.Id == id);
+        if (existing is not null)
+            return existing;
+
+        var product = new BaseProduct
+        {
+            Id = id,
+            ProductCode = $"P-{id}",
+            ProductName = name,
+            Spec = "规格A",
+            Unit = unit,
+            PackageUnit = packageUnit,
+            UnitsPerPackage = unitsPerPackage,
+            Status = 1
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        return product;
+    }
+
     /// <summary>播种一个特权入库操作员（SuperAdmin 角色 + stock-in 菜单）并返回其用户 Id。</summary>
     public static long SeedPrivilegedInboundOperator(ErpDbContext db)
     {

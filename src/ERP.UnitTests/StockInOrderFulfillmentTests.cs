@@ -284,33 +284,59 @@ public class StockInOrderFulfillmentTests
         SeedProduct(db, ProductA, "P-FUL-16", "商品A", "PCS", string.Empty, 0);
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, null, SupplierA, (ProductA, "PCS", -1m));
+        // ERP-504：写入边界即拒绝负数数量（零单据 / 零明细 / 零流水 / 零占号）。
+        var createError = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(SupplierA, null, (ProductA, "PCS", -1m))));
+        Assert.Equal(ErrorCodes.InvalidParameter, createError.Code);
+        Assert.Contains("必须大于 0", createError.Message);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockInDetails);
+        Assert.Empty(db.StockMovements);
+
+        // 承诺边界（审核）：已存数值被改写为负数时同样受控拒绝，零库存 / 零流水且状态保持已提交。
+        var id = await CreateAsync(ctl, null, SupplierA, (ProductA, "PCS", 1m));
         await ctl.Submit(id);
+        var stored = db.StockInDetails.Single(d => d.StockInId == id);
+        stored.Quantity = -1m;
+        db.SaveChanges();
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(id));
 
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
-        Assert.Contains("不能为负数", ex.Message);
+        Assert.Contains("必须大于 0", ex.Message);
         Assert.Empty(db.StockMovements);
         Assert.Empty(db.Stocks);
         Assert.Equal(DocumentStatus.Submitted, db.StockIns.Single(s => s.Id == id).Status);
     }
 
     [Fact]
-    public async Task Approve_零数量明细_允许空草稿但审核不产生任何库存变动()
+    public async Task Approve_零数量明细_草稿写入即拒绝且审核绝不产生任何库存变动()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-FUL-17", "商品A", "PCS", string.Empty, 0);
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, null, SupplierA, (ProductA, "PCS", 0m));
-        await SubmitAndApproveAsync(ctl, id);
+        // ERP-504：零数量行不是合法明细，写入边界即受控拒绝（零单据 / 零明细 / 零库存 / 零流水）。
+        var createError = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(SupplierA, null, (ProductA, "PCS", 0m))));
+        Assert.Equal(ErrorCodes.InvalidParameter, createError.Code);
+        Assert.Contains("必须大于 0", createError.Message);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockInDetails);
+        Assert.Empty(db.Stocks);
+        Assert.Empty(db.StockMovements);
+
+        // 受支持的空草稿头仍可保存，但提交 / 审核要求至少一行有效明细，且绝不产生任何库存变动。
+        var emptyId = await CreateAsync(ctl, null, SupplierA);
+        Assert.Equal(0m, db.StockIns.Single(s => s.Id == emptyId).TotalQuantity);
+
+        var submitError = await Assert.ThrowsAsync<BusinessException>(() => ctl.Submit(emptyId));
+        Assert.Equal(ErrorCodes.RuleConflict, submitError.Code);
+        Assert.Contains("入库单无明细", submitError.Message);
 
         Assert.Empty(db.Stocks);
         Assert.Empty(db.StockMovements);
-        var saved = db.StockIns.Single(s => s.Id == id);
-        Assert.Equal(DocumentStatus.Approved, saved.Status);
-        Assert.Equal(0m, saved.TotalQuantity);
+        Assert.Equal(DocumentStatus.Pending, db.StockIns.Single(s => s.Id == emptyId).Status);
     }
 
     // ==================== 权限与口径 ====================

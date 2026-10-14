@@ -355,7 +355,11 @@ public class ReturnSourceCancellationTests
     }
 
     private static StockInController NewStockInController(ErpDbContext db)
-        => StockInLegacyTestFixture.Create(db, SupplierA, WarehouseA);
+    {
+        // ERP-504：创建 / 提交 / 审核要求明细商品真实在用 —— 播种本夹具主数据（不新增任何授权或业务断言）。
+        StockInTestAuthorization.SeedProduct(db, Product1, name: "商品SRC-P1");
+        return StockInLegacyTestFixture.Create(db, SupplierA, WarehouseA);
+    }
 
     private static async Task<long> CreateStockOutAsync(StockOutController ctl, decimal quantity)
     {

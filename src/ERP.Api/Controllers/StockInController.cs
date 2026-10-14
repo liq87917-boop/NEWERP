@@ -36,6 +36,15 @@ namespace ERP.Api.Controllers;
 /// 得到同一受控错误，无从探测单据存在性；不存在「无请求上下文 / 空路径 / 匿名进程内调用」的免授权回退，
 /// 也不读取 <c>Request.Path</c> / 环境变量 / 测试开关。审核 / 取消仍在可串行化事务与行锁内复核实时授权与来源归属，
 /// 被拒绝方绝不改动单据 / 明细 / 状态 / 库存 / 流水，也绝不消耗单据号。</para>
+/// <para>ERP-504：创建 / 修改在单位折算与来源链接校验之后、<b>单号预约与任何写入之前</b>追加统一草稿护栏
+/// （<see cref="StockInAuthorizationRules.EnsureDraftValidAsync"/>：逐行正数量 / 实际存储精度 <c>DECIMAL(18,2)</c> /
+/// 非负毛重体积 / 与 <c>Calculate</c> 同源的表头合计 + 批量在用商品），校验覆盖<b>全部提交行</b>——
+/// 服务端在持久化时把每一行都强制为「正常」行，客户端 <c>IsDeleted</c> 绝不可能隐藏坏行后被重新启用；
+/// 提交 / 审核作为承诺边界在既有来源 / 单据锁内复核当前主数据与已存数值（
+/// <see cref="StockInAuthorizationRules.EnsureCommitReadyAsync"/>），空草稿头仍可保存但不可提交 / 审核。
+/// 明细没有客户端价格 / 成本字段：成本口径仍由 ERP-033 权威来源解析，绝不臆造来源、绝不改写已审核采购价；
+/// 历史取消 / 冲销路径（含无流水历史单据的原路冲回）不新增任何校验闸门。被拒绝的请求零单号消耗、
+/// 零表头 · 明细 · 来源 · 状态 · 库存 · 流水变化。</para>
 /// </summary>
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
@@ -175,6 +184,11 @@ public class StockInController : DocumentControllerBase<StockIn>
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
         await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
+        // ERP-504：草稿护栏（逐行形状 / 实际存储精度 / 表头合计 + 批量在用商品）在单位折算与来源校验之后、
+        // 单号预约与任何写入之前执行；请求侧校验覆盖全部提交行 —— 服务端会把每一行都强制为「正常」行
+        // (ApplyServerOwnedDetailIdentity)，客户端 IsDeleted 绝不可能隐藏坏行后被重新启用。
+        // 被拒绝的请求零单号消耗、零单据 / 明细 / 来源 / 状态变化。
+        await StockInAuthorizationRules.EnsureDraftValidAsync(Db, entity.Details);
 
         // ERP-477：主键 / 单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖（客户端提交值不参与持久化），
         // 明细身份（主键 / 归属单据 / 删除态）同口径重置，绝不采信客户端注入的明细 Id / IsDeleted / 表头身份。
@@ -194,13 +208,20 @@ public class StockInController : DocumentControllerBase<StockIn>
     /// <summary>
     /// 提交：ERP-352 统一实时闸门先于任何入库单字节读取，再复核已存单据可见性，最后走基类状态流转。
     /// 被拒绝 / 范围外 / 不存在的 Id 得到同一受控错误且零状态变化。
+    /// <para>ERP-504：提交是承诺边界之一 —— 空草稿头仍可保存，但提交要求至少一行有效明细，
+    /// 且已存明细的形状 / 实际存储精度与当前在用商品必须仍然成立；任一不满足即拒绝且状态保持「待提交」
+    /// （零状态变化、零库存 / 流水）。</para>
     /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
         var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
-        var entity = await GetOrThrowAsync(id, StockInAuthorizationRules.NotFoundText);
+        var entity = await Set.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound(StockInAuthorizationRules.NotFoundText);
         await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
+        // ERP-504：承诺边界复核（当前主数据 + 已存数值）；拒绝时零状态变化、零库存 / 流水。
+        await StockInAuthorizationRules.EnsureCommitReadyAsync(Db, entity.Details, "提交");
         return await base.Submit(id);
     }
 
@@ -220,6 +241,7 @@ public class StockInController : DocumentControllerBase<StockIn>
     /// <summary>
     /// 更新（ERP-477：来源归属先校验，单据身份 · 单号 · 状态与明细身份全部由服务端保持权威；
     /// ERP-352：统一实时闸门先于任何入库单字节读取，再校验「已存」与「请求」两侧归属；
+    /// ERP-504：请求侧内容（单位折算 → 来源链接 → 草稿护栏）全部通过后才改写已存单据 / 明细；
     /// 仅「待提交」可修改，被拒绝的请求零写入、零状态变化）。
     /// </summary>
     [HttpPut("{id:long}")]
@@ -244,6 +266,14 @@ public class StockInController : DocumentControllerBase<StockIn>
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
 
+        // ERP-477：明细身份（主键 / 归属单据 / 删除态 / 时间戳）一律由服务端重置；
+        // ERP-504：请求侧内容（单位折算 → 来源链接 → 草稿护栏）先在同一份请求对象上完成全部校验，
+        // 只有全部通过才改写已存单据 / 明细 —— 任一失败都不改单据 / 明细 / 状态，也不消耗新单号。
+        ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
+        await StockInAuthorizationRules.EnsureDraftValidAsync(Db, entity.Details);
+
         existing.StockInDate = entity.StockInDate;
         existing.PurchaseOrderId = entity.PurchaseOrderId;
         existing.SupplierId = entity.SupplierId;
@@ -251,12 +281,9 @@ public class StockInController : DocumentControllerBase<StockIn>
         existing.Remark = entity.Remark;
 
         Db.StockInDetails.RemoveRange(existing.Details);
-        // ERP-477：单据号 / 状态 / 删除态由服务端保持（客户端提交值不参与持久化），明细身份同口径重置。
-        ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
+        // ERP-477：单据号 / 状态 / 删除态由服务端保持（客户端提交值不参与持久化）。
         existing.Details = entity.Details;
-        await StockUnitConversion.NormalizeAsync(Db, existing.Details);
         Calculate(existing);
-        await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, existing);
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "入库单更新成功"));
@@ -266,6 +293,8 @@ public class StockInController : DocumentControllerBase<StockIn>
     /// 审核（按基础单位增加库存并写入库存流水，恰好一次）。
     /// <para>ERP-352：统一实时闸门先于任何入库单字节读取；已存单据可见性（范围外按「不存在」非披露拒绝）先于状态判定；
     /// 库存 / 流水 / 状态写入仍统一放进可串行化事务，锁内再复核实时授权与来源归属。</para>
+    /// <para>ERP-504：锁内追加承诺边界复核（至少一行有效明细 + 已存数值形状 / 实际存储精度 / 表头合计 + 当前在用商品），
+    /// 空明细与非法数值不得过账；被拒绝时整体回滚，来源剩余容量 / 成本 / 库存 / 流水 / 状态 / 单号全部不变。</para>
     /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
@@ -299,6 +328,10 @@ public class StockInController : DocumentControllerBase<StockIn>
             // 幂等护栏放进锁内：同单并发审核时，后到者在拿到锁后能看到先到者已产生的流水，从而被拒绝。
             if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockInType, entity.Id) > 0)
                 throw BusinessException.RuleConflict("该入库单已产生库存流水，不能重复审核");
+
+            // ERP-504：承诺边界复核（空 / 非正 / 不可表示数量、精度与合计、当前在用商品）在既有来源 / 单据锁内完成；
+            // 任一不满足即拒绝，单据状态 / 来源数量 / 成本 / 库存 / 流水全部保持原样（整体回滚）。
+            await StockInAuthorizationRules.EnsureCommitReadyAsync(Db, entity.Details, "审核");
 
             await StockInOrderFulfillmentRules.ValidateApprovalAsync(Db, entity);
 

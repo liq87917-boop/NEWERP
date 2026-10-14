@@ -35,7 +35,8 @@ public class StockInOutMovementLedgerTests
         SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);
         var ctl = NewStockInController(db);
         // Valid approved fulfillment source; unavailable USD valuation retains weighted-average costing.
-        db.BaseProducts.Add(new BaseProduct { Id = Product1, ProductCode = "LEDGER-PO-P1", ProductName = "P1", Unit = "PCS" });
+        // ERP-504：商品主数据由既有测试脚手架幂等播种（明细商品必须在用），不重复插入同主键行。
+        StockInTestAuthorization.SeedProduct(db, Product1, name: "P1");
         db.PurchaseOrders.Add(new PurchaseOrder
         {
             Id = 321L, OrderNo = "LEDGER-PO-321", SupplierId = 1L,
@@ -561,7 +562,11 @@ public class StockInOutMovementLedgerTests
     // ==================== 测试辅助 ====================
 
     private static StockInController NewStockInController(ErpDbContext db)
-        => StockInLegacyTestFixture.Create(db, 1L, WarehouseA);
+    {
+        // ERP-504：创建 / 提交 / 审核要求明细商品真实在用 —— 播种本夹具主数据（不新增任何授权或业务断言）。
+        StockInTestAuthorization.SeedProduct(db, Product1, name: "P1");
+        return StockInLegacyTestFixture.Create(db, 1L, WarehouseA);
+    }
 
     private static StockOutController NewStockOutController(ErpDbContext db)
     {
@@ -570,7 +575,6 @@ public class StockInOutMovementLedgerTests
         StockOutTestAuthorization.SeedProduct(db, Product1, name: "P1");
         return StockOutTestAuthorization.Create(db);
     }
-
     private static async Task<long> CreateStockInAsync(StockInController ctl, decimal quantity, string unit,
         long? purchaseOrderId)
     {
