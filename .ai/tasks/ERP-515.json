@@ -56,10 +56,10 @@
       "src/ERP.IntegrationTests/BulkSettlementPersistedAmountSqlServerTests.cs"
     ]
   },
-  "implementation_evidence": "FinanceBulkSettlementLifecycleRules:89-114 rounds TotalAmount/FreightCost2 and checks positive/nonnegative only; explicit comment forbids invented total==freight. FinanceSettlementControllers bulk Create:420/Update:462/operational:586 uses these. Finance2 bulk amounts defaultdecimal18,2 and Config only unique number. ERP-379/481 cover state/identity/server numbering, no scalar representability guard task in history/docs.",
+  "implementation_evidence": "FinanceBulkSettlementLifecycleRules:89-114 rounds TotalAmount/FreightCost2 and checks positive/nonnegative only; explicit comment forbids invented total==freight. FinanceSettlementControllers bulk Create:420/Update:462/operational:586 uses these. Finance2 bulk amounts defaultdecimal18,2 and Config only unique number. ERP-387/481 cover state/identity/server numbering, no scalar representability guard task in history/docs.",
   "depends_on": [
     "ERP-514",
-    "ERP-379",
+    "ERP-387",
     "ERP-481"
   ],
   "risk": "medium",

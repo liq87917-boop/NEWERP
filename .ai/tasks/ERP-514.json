@@ -64,12 +64,13 @@
       "src/ERP.IntegrationTests/ContainerSettlementPersistedAmountSqlServerTests.cs"
     ]
   },
-  "implementation_evidence": "FinanceContainerSettlementLifecycleRules.NormalizeTotalAmount:121 and NormalizeCost:131 round2 and check signs, no SQL range. FinanceSettlementControllers.Create:120/Update:169 normalizes before numbering/write; ChangeState:340 checks normalized values but not exact persisted consistency. Finance2.TotalAmount/FreightCost/OtherCost defaultdecimal18,2, config only unique SettlementNo. ERP-378/481 and source-service tasks cover lifecycle/ancestry/canonical input, not scalar storage bounds; no duplicate numeric-range task in full history/docs.",
+  "implementation_evidence": "FinanceContainerSettlementLifecycleRules.NormalizeTotalAmount:121 and NormalizeCost:131 round2 and check signs, no SQL range. FinanceSettlementControllers.Create:120/Update:169 normalizes before numbering/write; ChangeState:340 checks normalized values but not exact persisted consistency. Finance2.TotalAmount/FreightCost/OtherCost defaultdecimal18,2, config only unique SettlementNo. ERP-384/481 and source-service tasks cover lifecycle/ancestry/canonical input, not scalar storage bounds; no duplicate numeric-range task in full history/docs.",
   "depends_on": [
     "ERP-513",
-    "ERP-378",
+    "ERP-384",
     "ERP-481",
-    "ERP-508"
+    "ERP-508",
+    "ERP-392"
   ],
   "risk": "medium",
   "planning_stage": 3,
