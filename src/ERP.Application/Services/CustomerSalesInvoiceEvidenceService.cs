@@ -17,8 +17,9 @@ namespace ERP.Application.Services;
 /// 重复请求一律拒绝（不静默合并、不覆盖）；作废记录保留并可读，但不占用身份；</item>
 /// <item><b>分摊</b>（<see cref="PreviewAllocationsAsync"/> / <see cref="SaveAllocationsAsync"/>）：
 /// 只能分摊到既有、未删除、未取消且**客户与币种一致**的销售订单，同一订单不重复、合计不超过含税总额；</item>
-/// <item><b>登记 / 作废</b>（<see cref="RecordAsync"/> / <see cref="VoidAsync"/>）：登记冻结证据，
-/// 作废保留身份 / 金额 / 分摊 / 审计历史，不物理删除、不静默改写；</item>
+/// <item><b>登记 / 作废</b>（<see cref="RecordAsync"/> / <see cref="VoidAsync"/>）：登记在既有销售订单 / 发票行锁内
+/// 复核已持久化金额（实际存储精度 <c>DECIMAL(18,2)</c>、币种取整与金额等式）与分摊证据后冻结，
+/// 作废保留身份 / 金额 / 分摊 / 审计历史，不物理删除、不静默改写（ERP-511）；</item>
 /// <item><b>台账读取</b>（<see cref="ListAsync"/> / <see cref="GetAsync"/> /
 /// <see cref="ListOrderCandidatesAsync"/> / <see cref="ListTradeDocumentCandidatesAsync"/>）：
 /// 分页 / 有界、批量装载分摊行与订单，无逐行数据库查询。</item>
@@ -572,10 +573,13 @@ public static class CustomerSalesInvoiceEvidenceService
     // ==================== 5. 登记 / 作废（证据冻结与保留） ====================
 
     /// <summary>
-    /// 登记草稿发票（草稿 → 已登记）：登记前**复核**已持久化分摊行仍可权威分摊
+    /// 登记草稿发票（草稿 → 已登记）：登记前**复核**已持久化金额仍满足实际存储精度（<c>DECIMAL(18,2)</c>）、
+    /// 币种取整与金额等式，并复核已持久化分摊行仍可权威分摊
     /// （订单未删除 / 未取消、客户与币种一致、合计不超过含税总额），通过后只改发票状态与登记时间。
     /// <para>登记<strong>不</strong>开具真实发票、<strong>不</strong>调用任何开票 / 税务服务、<strong>不</strong>改动销售订单、
     /// 客户信用状态、收款单与其引用行、库存、退税与财务记录。</para>
+    /// <para>ERP-511：金额与分摊复核都在既有销售订单 / 发票行锁内、改状态之前完成；不一致的已持久化金额被受控拒绝，
+    /// 绝不静默改写任何已存储历史值，被拒调用不改变单号 / 发票 / 分摊 / 来源 / 状态 / 审计。</para>
     /// </summary>
     public static async Task<CustomerSalesInvoiceEvidenceDto> RecordAsync(IErpDbContext db, long invoiceId)
     {
@@ -598,6 +602,10 @@ public static class CustomerSalesInvoiceEvidenceService
 
         var invoice = await LoadAsync(db, invoiceId);
         CustomerSalesInvoiceEvidenceRules.EnsureRecordable(invoice.Status, IdentityOf(invoice));
+
+        // ERP-511：锁内复核已持久化金额（只读、不取整、不改写），不一致即拒绝且状态 / 字段 / 审计不变。
+        CustomerSalesInvoiceEvidenceRules.EnsurePersistedAmountsConsistent(
+            invoice.NetAmount, invoice.TaxAmount, invoice.GrossAmount, invoice.Currency, IdentityOf(invoice));
 
         await RevalidatePersistedAllocationsAsync(db, invoice);
 

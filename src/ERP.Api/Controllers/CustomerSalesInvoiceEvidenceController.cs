@@ -14,6 +14,9 @@ namespace ERP.Api.Controllers;
 /// <summary>
 /// 客户销项发票证据登记控制器（ERP-055）：登记普通发票 / 增值税专用发票 / 出口发票的**运营证据**，
 /// 并可（可选、显式）把含税总额分摊到既有销售订单。
+/// <para>ERP-511：创建草稿时，按币种精度取整后的不含税金额 / 税额 / 含税总额与分摊金额作为**单个标量**都必须落在
+/// 金额列实际存储精度（<c>DECIMAL(18,2)</c>）内，超出即在**任何表头 / 分摊行写入之前**受控拒绝；登记（Record）在既有
+/// 销售订单 / 发票行锁内只读复核已持久化金额的一致性，不一致即拒绝且不改写任何已存储历史值（作废 / 读取不新增闸门）。</para>
 /// <para>边界（控制器层同样遵守）：本模块<strong>不是</strong>发票开具系统（不连税务局、不调用任何开票服务）、
 /// <strong>不是</strong>税务申报与销项税金计算、<strong>不是</strong>应收账款台账或余额、<strong>不是</strong>收款核销；
 /// 所有接口只读写 <c>CustomerSalesInvoiceEvidences</c> / <c>CustomerSalesInvoiceAllocations</c> 两张表，
