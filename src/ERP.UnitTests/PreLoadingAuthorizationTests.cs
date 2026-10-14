@@ -47,6 +47,15 @@ public class PreLoadingAuthorizationTests
         db.SaveChanges();
     }
 
+    private static void SeedProduct(ErpDbContext db, long id, string code, string name)
+    {
+        db.BaseProducts.Add(new BaseProduct
+        {
+            Id = id, ProductCode = code, ProductName = name, Spec = "规格A", Unit = "PCS"
+        });
+        db.SaveChanges();
+    }
+
     private static ContainerBooking SeedBooking(ErpDbContext db, string no, long customerId,
         DocumentStatus status = DocumentStatus.Approved, bool deleted = false)
     {
@@ -493,6 +502,8 @@ public class PreLoadingAuthorizationTests
         using var db = TestDbFactory.Create();
         var (userId, employeeId) = SeedRestrictedOperator(db, PreLoadingAuthorizationRules.RequiredMenuCode);
         SeedCustomer(db, CustomerOwn, "C-OWN4B", "本人客户", empId: employeeId);
+        // ERP-505：明细行必须指向真实在用商品（草稿护栏在写入边界复核在用商品），本行只补真实主数据，断言不变。
+        SeedProduct(db, ProductA, "P-AUTH-OWN", "商品A");
 
         var ownBooking = SeedBooking(db, "PRE-OWN4B", CustomerOwn);
         var own = SeedPreLoading(db, "YZ-OWN4B", ownBooking.Id, DocumentStatus.Pending, "CTN-OWN4B", (ProductA, 2m));
@@ -532,6 +543,8 @@ public class PreLoadingAuthorizationTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        // ERP-505：提交 / 审核作为承诺边界复核「当前在用商品」，这里补真实主数据（断言口径不变）。
+        SeedProduct(db, ProductA, "P-AUTH-HIST", "商品A");
         var unlinked = SeedPreLoading(db, "YZ-HIST", null, DocumentStatus.Pending, "CTN-HIST", (ProductA, 4m));
         var ctl = NewController(db, userId);
 

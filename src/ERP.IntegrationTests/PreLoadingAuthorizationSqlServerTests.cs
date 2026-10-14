@@ -293,9 +293,12 @@ public sealed class PreLoadingAuthorizationSqlServerTests
             adminId = await ResolveSeededAdminIdAsync(db);
             var customerId = await SeedCustomerAsync(db, "并发审核客户");
             var bookingId = (await SeedBookingAsync(db, customerId, DocumentStatus.Approved)).Id;
+            // ERP-505：审核是承诺边界，要求至少一行有效明细且商品仍在用；这里补真实主数据 + 合法明细行，
+            // 并发「恰好一个成功」的业务断言保持不变。
+            var productId = await SeedProductAsync(db);
             var keyword = Tag();
             preLoadingId = (await SeedPreLoadingAsync(db, $"YZ-{keyword}-APPROVE", bookingId,
-                DocumentStatus.Submitted, "CTN-APPROVE")).Id;
+                DocumentStatus.Submitted, "CTN-APPROVE", (productId, 5m))).Id;
         }
 
         var results = await RaceAsync(

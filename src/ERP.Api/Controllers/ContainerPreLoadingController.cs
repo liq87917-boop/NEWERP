@@ -15,6 +15,13 @@ namespace ERP.Api.Controllers;
 /// ERP-363：列表 / 详情 / 出运跟踪 / 出运时间线 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除每一个路由
 /// 都先解析实时身份、账号状态、既有「预装柜单」菜单授权与权威客户数据范围，且严格先于任何计数、
 /// 单据号生成与写入）。
+/// <para>ERP-505：创建 / 修改在既有授权与来源证据链接校验之后、<b>单号预约与任何写入之前</b>追加统一草稿护栏
+/// （<see cref="ContainerLoadingDraftValidationRules"/>：逐行正数量 / 非负箱数 · 毛重 · 体积 /
+/// 实际存储精度 <c>DECIMAL(18,2)</c>、与 <c>Calculate</c> 同源的表头合计 + 批量在用商品），
+/// 校验覆盖<b>全部提交行</b> —— 服务端在持久化时把每一行都强制为「正常」行，客户端 <c>IsDeleted</c>
+/// 绝不可能隐藏坏行后被重新启用；提交 / 审核作为承诺边界在既有销售订单行 · 订柜行 · 本单行更新锁内
+/// 复核已存明细与当前主数据，空草稿头仍可保存但不可提交 / 审核；取消 / 删除等历史 undo 路径不新增任何闸门。
+/// 被拒绝的请求零单号消耗、零表头 · 明细 · 来源 · 状态 · 库存 · 财务变化。</para>
 /// </summary>
 [Route("api/container/pre-loadings")]
 public class ContainerPreLoadingController : DocumentControllerBase<ContainerPreLoading>
@@ -81,6 +88,12 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
         await PreLoadingBookingLinkRules.ValidateLinkAsync(Db, entity, CurrentUserId());
         // ERP-368：显式需求计划证据链接在占用流水 / 落库之前统一校验（未链接的历史单据行为不变）。
         await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
+        // ERP-505：手工 / 链接草稿的统一写入护栏（全部提交行的正数量 · 非负箱数 / 毛重 / 体积 · 实际存储精度 ·
+        // 与 Calculate 同源的表头合计 + 批量在用商品）在授权与来源证据校验之后、单号预约与任何写入之前执行；
+        // 链接规则对「未链接」直接返回，本护栏正是覆盖该缺口，且校验全部提交行（含客户端 IsDeleted=true 的行 ——
+        // 服务端随后会把每一行都强制为「正常」行，客户端删除态绝不可能隐藏坏行）。
+        // 被拒绝的请求零单号消耗、零表头 · 明细 · 来源 · 状态变化。
+        await ContainerLoadingDraftValidationRules.EnsurePreLoadingDraftValidAsync(Db, entity);
 
         // ERP-485：全部校验通过之后，主键 / 单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖，
         // 明细身份（主键 / 归属单据 / 删除态 / 时间戳）同口径重置；行上的显式需求计划证据链接原样保留，
@@ -137,6 +150,12 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
             // ERP-368：在替换任何字段 / 明细之前统一校验显式需求计划证据链接（失败时库中单据原样保留）。
             await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
 
+            // ERP-505：请求携带明细时，先在请求对象上完成统一草稿护栏（全部提交行的形状 / 实际存储精度 /
+            // 与 Calculate 同源的表头合计 + 批量在用商品）；任一不满足即在改写库中任何字段 / 明细之前拒绝
+            // —— 被拒绝的请求零表头 / 明细 / 来源 / 状态变化，也不消耗新单号。
+            if (entity.Details is { Count: > 0 })
+                await ContainerLoadingDraftValidationRules.EnsurePreLoadingDraftValidAsync(Db, entity);
+
             existing.LoadingDate = entity.LoadingDate;
             existing.BookingId = entity.BookingId;
             existing.ContainerNo = entity.ContainerNo;
@@ -145,7 +164,7 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
 
             // ERP-372：未携带明细 = 仅更新主表 —— 保留既有明细与其显式需求计划证据链接
             // （SourceSalesOrderDetailId），绝不因主表编辑而静默清空需求来源证据。
-            // 携带明细 = 既有「整体替换」语义（替换前已由 ValidateLinksAsync 统一校验）。
+            // 携带明细 = 既有「整体替换」语义（替换前已由 ValidateLinksAsync 与 ERP-505 草稿护栏统一校验）。
             // ERP-485：替换时明细身份（主键 / 归属单据 / 删除态 / 时间戳）一律由服务端权威覆盖，
             // 行上的显式需求计划证据链接原样随行保留，绝不臆造链接、也绝不静默清空。
             if (entity.Details is { Count: > 0 })
@@ -236,6 +255,10 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
             await PreLoadingBookingLinkRules.ValidateLinkAsync(Db, entity, CurrentUserId(), entity.Id);
             // ERP-368：提交前复核显式需求计划证据链接（失败直接拒绝并回滚，状态与明细保持不变）。
             await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
+            // ERP-505：提交是承诺边界 —— 空草稿头仍可保存，但提交要求至少一行有效明细，且已存明细的形状 /
+            // 实际存储精度 / 与 Calculate 同源的表头合计与当前在用商品必须在既有订柜 · 本单锁内仍然成立；
+            // 任一不满足即拒绝并回滚（零状态变化、零库存 / 财务 / 明细 / 来源变化）。
+            await ContainerLoadingDraftValidationRules.EnsurePreLoadingCommitReadyAsync(Db, entity, "提交");
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
@@ -288,6 +311,10 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
             await PreLoadingBookingLinkRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
             // ERP-368 显式需求计划证据链接与累计容量护栏（按来源销售订单明细逐条；只判定，不锁库 / 不过账）。
             await PreLoadingSalesOrderLinkRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
+            // ERP-505：审核是承诺边界 —— 在既有销售订单行 · 订柜行 · 本单行锁内复核已存明细的形状 /
+            // 实际存储精度 / 与 Calculate 同源的表头合计与当前在用商品（空 / 非法明细不得进入已审核）；
+            // 任一不满足即拒绝并整体回滚（零状态 / 明细 / 需求 / 库存 / 财务变化）。
+            await ContainerLoadingDraftValidationRules.EnsurePreLoadingCommitReadyAsync(Db, entity, "审核");
 
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
