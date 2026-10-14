@@ -19,6 +19,14 @@ namespace ERP.Api.Controllers;
 /// 参与方边界（ERP-041）：只读写装柜清单的参与方子表与兼容客户字段 ——
 /// 不按数量 / 体积 / 金额分摊费用、不生成费用单 / 结算记录，不改写装柜明细、柜号、订柜跟踪值、
 /// 单证、库存与客户主数据；生产库结构变更仍由 Human Gate 控制（建表 / 索引由 SchemaUpgrader 幂等补齐）。
+/// <para>ERP-506：创建 / 修改在既有授权与来源证据链接校验之后、<b>单号预约与任何写入之前</b>追加统一草稿护栏
+/// （<see cref="ContainerLoadingDraftValidationRules"/>：逐行正数量 / 非负箱数 · 毛重 · 体积 /
+/// 实际存储精度 <c>DECIMAL(18,2)</c>、与 <c>Calculate</c> 同源的表头合计 + 批量在用商品），
+/// 校验覆盖<b>全部提交行</b> —— 服务端在持久化时把每一行都强制为「正常」行，客户端 <c>IsDeleted</c>
+/// 绝不可能隐藏坏行后被重新启用；提交 / 审核作为承诺边界在既有上游出库行 · 预装柜行 · 本单行锁内
+/// 复核已存明细与当前主数据，空草稿头仍可保存但不可提交 / 审核；取消 / 删除等历史 undo 路径不新增任何闸门。
+/// 被拒绝的请求零单号消耗、零表头 · 明细 · 来源 · 状态 · 库存 · 财务变化；装柜清单明细没有客户端单价 /
+/// 成本 / 币种字段，因此不存在可校验的货币合计，也绝不引入币种 / 单位混算。</para>
 /// </remarks>
 [Route("api/container/loading-lists")]
 public class ContainerLoadingListController : DocumentControllerBase<ContainerLoadingList>
@@ -101,6 +109,12 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
         // ERP-366：在写入任何明细之前校验显式出运证据链接（来源已审核且未删除、商品 / 基础单位一致、客户在范围内）。
         await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
+        // ERP-506：手工 / 链接草稿的统一写入护栏（全部提交行的正数量 · 非负箱数 / 毛重 / 体积 · 实际存储精度 ·
+        // 与 Calculate 同源的表头合计 + 批量在用商品）在授权与来源证据校验之后、单号预约与任何写入之前执行；
+        // 链接规则只校验显式 SourceStockOutDetailId 的行，本护栏正是覆盖「未链接（手工）行」的缺口，
+        // 且校验全部提交行（含客户端 IsDeleted=true 的行 —— 服务端随后会把每一行都强制为「正常」行，
+        // 客户端删除态绝不可能隐藏坏行）。被拒绝的请求零单号消耗、零表头 · 明细 · 来源 · 状态变化。
+        await ContainerLoadingDraftValidationRules.EnsureLoadingListDraftValidAsync(Db, entity);
 
         // ERP-485：只有全部校验通过之后才占用单据号流水并落库；主键 / 单号 / 状态 / 删除态 / 时间戳全部由服务端
         // 权威覆盖（客户端注入值不参与持久化），明细身份同口径重置，行上的显式出运证据链接原样保留。
@@ -145,6 +159,12 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             // ERP-366：拟议明细的显式出运证据链接必须整体有效，否则在替换任何明细之前 fail closed。
             entity.Id = id;
             await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
+
+            // ERP-506：请求携带明细时，先在请求对象上完成统一草稿护栏（全部提交行的形状 / 实际存储精度 /
+            // 与 Calculate 同源的表头合计 + 批量在用商品）；任一不满足即在改写库中任何字段 / 明细之前拒绝
+            // —— 被拒绝的请求零表头 / 明细 / 来源 / 状态变化，也不消耗新单号。
+            if (entity.Details is { Count: > 0 })
+                await ContainerLoadingDraftValidationRules.EnsureLoadingListDraftValidAsync(Db, entity);
 
             existing.PreLoadingId = entity.PreLoadingId;
             existing.LoadingDate = entity.LoadingDate;
@@ -544,6 +564,10 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
             // ERP-366：提交前复核显式出运证据链接（来源是否仍为已审核且未删除、商品 / 客户是否仍匹配）。
             await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
+            // ERP-506：提交是承诺边界 —— 空草稿头仍可保存，但提交要求至少一行有效明细，且已存明细的形状 /
+            // 实际存储精度 / 与 Calculate 同源的表头合计与当前在用商品必须在既有预装柜 · 本单锁内仍然成立；
+            // 任一不满足即拒绝并回滚（零状态变化、零库存 / 财务 / 明细 / 来源变化）。
+            await ContainerLoadingDraftValidationRules.EnsureLoadingListCommitReadyAsync(Db, entity, "提交");
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
@@ -593,6 +617,10 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             await ContainerLoadingFulfillmentRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
             // ERP-366 显式出运证据链接与累计容量护栏（只判定，不过账库存 / 财务）。
             await LoadingStockOutLinkRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
+            // ERP-506：审核是承诺边界 —— 在既有上游出库行 · 预装柜行 · 本单行锁内复核已存明细的形状 /
+            // 实际存储精度 / 与 Calculate 同源的表头合计与当前在用商品（空 / 非法明细不得进入已审核）；
+            // 任一不满足即拒绝并整体回滚（零状态 / 明细 / 来源 / 库存 / 财务变化）。
+            await ContainerLoadingDraftValidationRules.EnsureLoadingListCommitReadyAsync(Db, entity, "审核");
 
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();

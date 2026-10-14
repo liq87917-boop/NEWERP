@@ -225,9 +225,11 @@ public sealed class LoadingListAuthorizationSqlServerTests
             adminId = await ResolveSeededAdminIdAsync(db);
             var customerA = await SeedCustomerAsync(db, "并发参与方A");
             var customerB = await SeedCustomerAsync(db, "并发参与方B");
+            var productId = await SeedLiveProductAsync(db);
             var keyword = Tag();
             var list = await SeedLoadingListAsync(db, $"ZQ-{keyword}-RACE", customerA, DocumentStatus.Submitted);
             loadingListId = list.Id;
+            await AddValidDetailAsync(db, list.Id, productId);   // ERP-506：审核需至少一行有效明细
             await SeedParticipantAsync(db, list.Id, customerA, primary: true);
             participantBId = (await SeedParticipantAsync(db, list.Id, customerB)).Id;
         }
@@ -261,9 +263,12 @@ public sealed class LoadingListAuthorizationSqlServerTests
         {
             adminId = await ResolveSeededAdminIdAsync(db);
             var customerId = await SeedCustomerAsync(db, "并发审核客户");
+            var productId = await SeedLiveProductAsync(db);
             var keyword = Tag();
-            loadingListId = (await SeedLoadingListAsync(db,
-                $"ZQ-{keyword}-APPROVE", customerId, DocumentStatus.Submitted)).Id;
+            var submitted = await SeedLoadingListAsync(db,
+                $"ZQ-{keyword}-APPROVE", customerId, DocumentStatus.Submitted);
+            await AddValidDetailAsync(db, submitted.Id, productId);   // ERP-506：审核需至少一行有效明细
+            loadingListId = submitted.Id;
         }
 
         var results = await RaceAsync(
@@ -359,6 +364,36 @@ public sealed class LoadingListAuthorizationSqlServerTests
         db.ContainerLoadingLists.Add(list);
         await db.SaveChangesAsync();
         return list;
+    }
+
+    /// <summary>
+    /// ERP-506：播种一条**真实在用商品**（既有主数据形状），供承诺边界（提交 / 审核）复核使用；
+    /// 不新增任何授权、菜单或角色，只补齐既有夹具缺失的在用商品。
+    /// </summary>
+    private static async Task<long> SeedLiveProductAsync(ErpDbContext db)
+    {
+        var product = new BaseProduct
+        {
+            ProductCode = $"LL-P-{Guid.NewGuid():N}"[..30], ProductName = "装柜授权测试商品",
+            Spec = "规格A", Unit = "PCS", Status = 1
+        };
+        db.BaseProducts.Add(product);
+        await db.SaveChangesAsync();
+        return product.Id;
+    }
+
+    /// <summary>
+    /// ERP-506：为清单追加一条**合法**明细行（正数量、非负箱数 / 毛重 / 体积、在用商品），
+    /// 使提交 / 审核承诺边界至少存在一行有效明细 —— 只补夹具数据，不改任何业务断言。
+    /// </summary>
+    private static async Task AddValidDetailAsync(ErpDbContext db, long loadingListId, long productId)
+    {
+        db.ContainerLoadingDetails.Add(new ContainerLoadingDetail
+        {
+            LoadingListId = loadingListId, ProductId = productId, ProductName = "装柜授权测试商品",
+            Quantity = 1m, Cartons = 1m, Weight = 1m, Volume = 0.1m, Remark = "ERP-506_FIXTURE"
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<ContainerLoadingListParticipant> SeedParticipantAsync(

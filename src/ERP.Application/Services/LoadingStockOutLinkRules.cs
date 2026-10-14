@@ -24,6 +24,12 @@ namespace ERP.Application.Services;
 /// <para>ERP-367 追加<b>取消方向</b>的只读判定：来源销售出库单取消 / 冲销前，若仍存在「已审核、未删除」装柜清单明细
 /// 显式链接到本单明细（<see cref="EnsureNoEffectiveApprovedLoadingAsync"/>），则 fail closed 拒绝并给出可执行的
 /// 装柜撤销要求；装柜取消后护栏即时释放，但链接与历史证据原样保留。</para>
+/// <para><b>ERP-506 边界</b>：本类只校验<b>显式链接</b>（<c>SourceStockOutDetailId</c> 为正）的行，未链接（手工 / 历史）行
+/// 在 <c>link == null</c> 时<b>直接跳过</b>商品 / 数值形状判定，因此链接规则<b>不</b>覆盖未链接草稿的行完整性；
+/// 该缺口由共享的 <see cref="ContainerLoadingDraftValidationRules"/> 在装柜清单创建 / 修改（写入边界）与提交 / 审核
+/// （承诺边界，在同一确定性锁与可串行化事务内）统一补齐（正数量、非负箱数 · 毛重 · 体积、实际存储精度
+/// <c>DECIMAL(18,2)</c> 与同源表头合计、批量在用商品）。本类<b>不</b>重复实现该口径，也绝不因此臆造 / 清空任何显式证据链接；
+/// 显式链接的来源证据 / 累计容量判定与取消护栏口径<b>完全不变</b>。</para>
 /// </summary>
 public static class LoadingStockOutLinkRules
 {

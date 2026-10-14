@@ -229,6 +229,30 @@ public static class ContainerLoadingDraftValidationRules
         return EnsureCommitReadyAsync(db, Project(entity.Details), action, ct);
     }
 
+    /// <summary>
+    /// 装柜清单创建 / 修改共享护栏（ERP-506）：在**请求对象**上校验**全部提交行**（含客户端 <c>IsDeleted = true</c> 的行 ——
+    /// 服务端随后由 <c>ApplyServerOwnedDetailIdentity</c> 把每一行都强制为「正常」行，客户端删除态绝不可能隐藏坏行），
+    /// 调用点保证发生在单号预约与任何表头 / 明细 / 来源写入之前。仅作薄适配，判定口径与预装柜侧**完全同源**。
+    /// </summary>
+    public static Task EnsureLoadingListDraftValidAsync(IErpDbContext db, ContainerLoadingList entity,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        return EnsureDraftValidAsync(db, Project(entity.Details), ct);
+    }
+
+    /// <summary>
+    /// 装柜清单提交 / 审核共享复核（ERP-506）：对**已存明细**复核至少一行有效明细、形状 / 实际存储精度 /
+    /// 与 <c>Calculate</c> 同源的表头合计，并实时复核当前在用商品（批量，当前主数据）。调用方保证在既有
+    /// 上游出库行 · 预装柜行 · 本单行锁内执行；任一不满足即拒绝，且零单据 / 状态 / 明细 / 来源 / 库存 / 财务 / 单号变化。
+    /// </summary>
+    public static Task EnsureLoadingListCommitReadyAsync(IErpDbContext db, ContainerLoadingList entity,
+        string action, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        return EnsureCommitReadyAsync(db, Project(entity.Details), action, ct);
+    }
+
     /// <summary>逐行形状 / 精度校验（调用方决定行集合口径）。</summary>
     private static void EnsureLineShape(IReadOnlyList<ContainerLoadingDraftLine> rows)
     {
