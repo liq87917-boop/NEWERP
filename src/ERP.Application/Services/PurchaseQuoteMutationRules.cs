@@ -20,6 +20,11 @@ namespace ERP.Application.Services;
 /// （<c>DECIMAL(18,4)</c>）内可表示；币种必须是受支持口径；选中标记与状态必须一致；含税总额一律由服务端按
 /// 「单价 × 数量」在 EF 精度重算（绝不采信客户端 <c>TotalAmount</c>）；明确拒绝客户端伪造的
 /// 「已转采购订单」状态、采购单号式 <c>RefOrderNo</c> 转换证据与审计字段。</para>
+/// <para><b>持久化精度护栏</b>（ERP-528）：<c>PurchaseQuote.Quantity</c> / <c>QuotePrice</c> 与服务端重算的
+/// <c>TotalAmount</c> 必须能在与实际列声明同源的 <c>DECIMAL(18,4)</c> 内<b>逐位原样</b>表示（绝对值不超过
+/// <see cref="MaxDecimal18Scale4"/>、小数位不超过 <see cref="DecimalScale"/>）。任何过小数位 / 越界值一律以既有受控
+/// <c>InvalidParameter</c> 错误拒绝（<see cref="EnsureRepresentable"/>），<b>绝不静默取整或截断</b>，也绝不消耗单号或
+/// 改写任何比价行 / 审批决定行。</para>
 /// <para><b>边界</b>：本类只做锁定、事务、校验与字段映射；不新增表 / 列 / 索引 / 菜单 / 角色 / 用户授权，
 /// 不伪造任何授权，也绝不把空身份当作匿名或管理员；不改写审批决定历史、采购订单、库存 / 财务记录与来源单据。</para>
 /// </summary>
@@ -62,6 +67,15 @@ public static class PurchaseQuoteMutationRules
 
     /// <summary><c>DECIMAL(18,4)</c> 的最大可表示绝对值（18 位有效数字、4 位小数）。</summary>
     public const decimal MaxDecimal18Scale4 = 99_999_999_999_999.9999m;
+
+    /// <summary>
+    /// 持久化精度口径文案（接口 / 文档同源，ERP-528）：数量 / 单价 / 服务端重算总额与 <c>db_owner.PurchaseQuotes</c>
+    /// 的 <c>DECIMAL(18,4)</c> 列逐字同源 —— 绝对值不超过 <c>99_999_999_999_999.9999</c>、小数位不超过 4；
+    /// 不可原样存储的值一律受控拒绝（<c>InvalidParameter</c>），绝不静默取整。
+    /// </summary>
+    public const string PersistedNumericText =
+        "比价行的数量 / 单价 / 服务端重算总额必须在 db_owner.PurchaseQuotes 的 DECIMAL(18,4) 列内逐位原样可存储" +
+        "（绝对量不超过 99_999_999_999_999.9999 且小数位不超过 4）：不可表示的值一律受控拒绝，绝不静默取整或截断。";
 
     /// <summary>锁序口径文案（接口 / 文档同源）。</summary>
     public const string LockOrderText =
@@ -249,9 +263,27 @@ public static class PurchaseQuoteMutationRules
     public static bool IsClientStatus(string? status)
         => status is PendingStatus or SelectedStatus or DiscardedStatus;
 
-    /// <summary>值是否在 <c>DECIMAL(18,4)</c> 精度内可表示（最多 4 位小数、18 位有效数字）。</summary>
+    /// <summary>
+    /// 值是否在 <c>DECIMAL(18,4)</c> 精度内可表示（最多 4 位小数、18 位有效数字）。
+    /// <para>纯判定：不取整、不截断、不改写入参。更细的小数位（如 <c>1.00001</c>）与越界量（如 <c>1e14</c>）
+    /// 均返回 <c>false</c> —— 真实列会把它们收敛为更粗的小数位或直接溢出，因此**不可**原样存储。</para>
+    /// </summary>
     public static bool IsRepresentable(decimal value)
         => decimal.Round(value, DecimalScale) == value && Math.Abs(value) <= MaxDecimal18Scale4;
+
+    /// <summary>
+    /// 校验（并按原值返回）一个标量可在 <c>DECIMAL(18,4)</c> 列内**逐位原样**存储；不可表示时抛既有受控业务错误
+    /// （<c>InvalidParameter</c>，沿用调用方给定的既有文案，ERP-528）。
+    /// <para>纯函数：绝不取整、截断或改写任何状态；调用方必须在任何写入之前调用，使过小数位 / 越界值被拒绝而不是被
+    /// 静默取整。</para>
+    /// </summary>
+    public static decimal EnsureRepresentable(decimal value, string errorText)
+    {
+        ArgumentNullException.ThrowIfNull(errorText);
+        if (!IsRepresentable(value))
+            throw BusinessException.InvalidParameter(errorText);
+        return value;
+    }
 
     /// <summary>服务端按「单价 × 数量」在 EF 精度重算含税总额（绝不采信客户端 <c>TotalAmount</c>）。</summary>
     public static decimal CalculateTotalAmount(decimal quotePrice, decimal quantity)
@@ -281,8 +313,10 @@ public static class PurchaseQuoteMutationRules
     }
 
     /// <summary>
-    /// 待比较草稿校验（服务端唯一权威）：批次号非空且有界；数量为正、价格为非负且都在 EF 精度内可表示；
-    /// 币种受支持；状态处于客户端可维护口径且与选中标记一致；含税总额由服务端重算覆盖。
+    /// 待比较草稿校验（服务端唯一权威）：批次号非空且有界；数量为正、价格为非负且都在实际列声明的
+    /// <c>DECIMAL(18,4)</c> 精度内可表示（最多 4 位小数、绝对值不超过 <see cref="MaxDecimal18Scale4"/>，
+    /// 逐位原样、绝不静默取整）；币种受支持；状态处于客户端可维护口径且与选中标记一致；含税总额由服务端按
+    /// 「单价 × 数量」重算覆盖，并在重算后同样按该精度判定。
     /// 校验通过后 <paramref name="quote"/> 的状态 / 币种 / 总额 / 批次号被归一化为权威值。
     /// </summary>
     public static void ValidateDraft(PurchaseQuote quote)
@@ -300,19 +334,18 @@ public static class PurchaseQuoteMutationRules
         if (quote.IsSelected != string.Equals(rawStatus, SelectedStatus, StringComparison.Ordinal))
             throw BusinessException.InvalidParameter(SelectionText);
 
-        if (quote.Quantity <= 0 || !IsRepresentable(quote.Quantity))
-            throw BusinessException.InvalidParameter(QuantityText);
+        if (quote.Quantity <= 0) throw BusinessException.InvalidParameter(QuantityText);
+        EnsureRepresentable(quote.Quantity, QuantityText);
 
-        if (quote.QuotePrice < 0 || !IsRepresentable(quote.QuotePrice))
-            throw BusinessException.InvalidParameter(PriceText);
+        if (quote.QuotePrice < 0) throw BusinessException.InvalidParameter(PriceText);
+        EnsureRepresentable(quote.QuotePrice, PriceText);
 
         var currency = (quote.Currency ?? string.Empty).Trim().ToUpperInvariant();
         if (!SupportedCurrencies.Contains(currency, StringComparer.Ordinal))
             throw BusinessException.InvalidParameter(CurrencyText);
 
         var total = CalculateTotalAmount(quote.QuotePrice, quote.Quantity);
-        if (!IsRepresentable(total))
-            throw BusinessException.InvalidParameter(TotalText);
+        EnsureRepresentable(total, TotalText);
 
         quote.QuoteNo = quoteNo;
         quote.Status = rawStatus;

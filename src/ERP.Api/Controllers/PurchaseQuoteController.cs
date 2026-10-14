@@ -147,6 +147,8 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     /// 明确拒绝客户端伪造的「已转采购订单」状态、采购单号式 <c>RefOrderNo</c> 与主键 / 审计 / 软删除 / 并发令牌字段。
     /// ERP-476：显式供应商 / 商品 / 归属客户引用在**单号预约与任何写入之前**复核实时主数据引用，
     /// 「已选中 + 选中该供应商」另按承诺级复核（绝不把缺失 / 0 静默当作实时采购引用）；失败零写入、零占号。
+    /// ERP-528：数量 / 单价与服务端重算总额必须在实际列声明 <c>DECIMAL(18,4)</c> 内逐位原样可存储，
+    /// 过小数位 / 越界值以受控错误拒绝（绝不静默取整），且拒绝发生在任何写入与单号预约之前。
     /// </summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] PurchaseQuote entity)
@@ -186,6 +188,8 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     /// 选中状态变更一律拒绝；待比较草稿按服务端口径校验并重算总额。被拒整体回滚（零部分写入）。
     /// ERP-476：未决定草稿在锁内改写任何字段之前复核显式供应商 / 商品 / 归属客户的实时主数据引用，
     /// 「已选中 + 选中该供应商」另按承诺级复核；被拒时锁内权威行 / 单号 / 状态均不变。
+    /// ERP-528：未决定草稿的数量 / 单价与服务端重算总额同样必须在声明 <c>DECIMAL(18,4)</c> 内逐位原样可存储，
+    /// 过小数位 / 越界值以受控错误拒绝（绝不静默取整），失败整体回滚（零部分写入、零单号消耗）。
     /// </summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] PurchaseQuote entity)

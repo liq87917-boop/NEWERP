@@ -1213,6 +1213,20 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_CustomerSalesInvoiceCollectionAllocations_Status_AllocatedAt")
             .HasFilter("IsDeleted = 0");
 
+        // ============ ERP-528：供应商比价的实际存储精度（与 SchemaUpgrader 第 15 段建表脚本同源） ============
+        // 设计口径：
+        //   1. db_owner.PurchaseQuotes 由权威建表脚本（SchemaUpgrader 第 15 段）以 Quantity / QuotePrice /
+        //      TotalAmount = DECIMAL(18,4) 创建；EF 模型此前**未**显式 HasPrecision，按 SQL Server 默认精度映射为
+        //      decimal(18,2)，于是服务端归一化后的合法 3 / 4 位小数（含服务端重算总额）在到达 SQL 之前被静默取整到
+        //      2 位，与实际列声明不一致；
+        //   2. 这里显式声明 (18,4) 让模型映射与权威列声明**逐字一致**（与 BaseProductSupplier.MinOrderQty /
+        //      Stock 系列同一处理），合法的 4 位小数数量 / 单价 / 总额原样往返；
+        //   3. 只声明精度：不新增表 / 列 / 索引 / 菜单 / 权限，不改任何列类型与 DDL；不可原样存储的值由
+        //      PurchaseQuoteMutationRules 在写入之前受控拒绝（绝不静默取整）。
+        modelBuilder.Entity<PurchaseQuote>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseQuote>().Property(x => x.QuotePrice).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseQuote>().Property(x => x.TotalAmount).HasPrecision(18, 4);
+
         // ============ ERP-095：供应商比价价格审批与供应商选择历史（append-only） ============
         // 设计口径：
         //   1. 只记录「批准 / 拒绝」决定与选中供应商快照，不自动选供应商、不定价、不改写比价行、
