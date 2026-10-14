@@ -24,6 +24,10 @@ namespace ERP.Api.Controllers;
 /// 「客户资料」（customer）功能菜单（缺一即 fail closed，与月度汇总及 ERP-437 登记册路由同码同源）与 ERP-097
 /// 权威客户范围，再把范围下推到台账 / 详情 / 登记 / 修改 / 记录 / 作废；范围外 / 已删除 / 不存在的协议一律返回
 /// 同一条不披露存在性的错误，<strong>不</strong>新增任何菜单 / 角色 / 用户授权，也<strong>不</strong>做匿名 / 管理员回退。</para>
+/// <para>并发（ERP-519）：每条路由都在授权解析（实时身份 + 「客户资料」菜单 + ERP-097 权威客户范围）
+/// <strong>成功之后</strong>才进入服务层写入；服务层在<strong>同一原子事务</strong>内先取<strong>同一把协议行锁</strong>
+/// （<see cref="AgencyFeeEvidenceConcurrencyRules"/>），锁内重读权威状态 / 客户范围 / 已持久化费用条款后才写入，
+/// 因此并发登记 / 作废与迟到的草稿修改严格串行：被拒请求零字段 / 零状态 / 零审计变更。</para>
 /// </summary>
 [ApiController]
 [Route("api/agency-service-fee-agreements")]
@@ -71,7 +75,9 @@ public class AgencyServiceFeeAgreementController : ControllerBase
             "代理服务费协议证据草稿已登记（仅商业条款证据留痕；未开发票、未记账、未授权付款）"));
     }
 
-    /// <summary>修改草稿协议证据（已登记 / 已作废拒绝修改；协议号与客户快照由服务端重新写入）</summary>
+    /// <summary>修改草稿协议证据（已登记 / 已作废拒绝修改；协议号与客户快照由服务端重新写入）
+    /// <para>ERP-519：修改在<strong>同一原子事务 + 同一协议行锁</strong>内完成，锁内重读权威状态后才判定可编辑性，
+    /// 因此并发登记 / 作废后到达的草稿修改一律被拒绝（零字段 / 零状态 / 零审计变更）。</para></summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] AgencyServiceFeeAgreementSaveDto dto)
     {
@@ -86,6 +92,8 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// <strong>不</strong>开发票、<strong>不</strong>记账、<strong>不</strong>授权或发起付款，也不改写任何既有记录。
     /// <para>ERP-516：冻结状态与审计字段之前先只读复核已持久化费用条款（固定金额必须可在 <c>DECIMAL(18,2)</c> 内
     /// 原样存储、费率必须 (0,100] 且 4 位小数、两种口径互斥）；不一致时受控拒绝且协议 / 审计零变更。</para>
+    /// <para>ERP-519：上述复核与冻结都在<strong>同一原子事务 + 同一协议行锁</strong>内、按锁内重读的权威状态进行，
+    /// 并发重复登记只有唯一赢家（输家绝不覆盖赢家的登记人与时间戳）。</para>
     /// </summary>
     [HttpPost("{id:long}/record")]
     public async Task<IActionResult> Record(long id)
@@ -99,6 +107,8 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// <summary>
     /// 作废协议证据（必须填写作废原因）：保留协议身份、费用条款、客户快照、登记人与时间戳及审计历史，
     /// 不物理删除、不改写已登记条款，也不产生任何发票 / 记账 / 付款 / 法律动作；重复作废被拒绝。
+    /// <para>ERP-519：作废与修改 / 登记共用<strong>同一原子事务 + 同一协议行锁</strong>，锁内重读权威状态后才写入，
+    /// 并发重复作废只有唯一赢家（输家绝不覆盖赢家已保留的原始作废原因与时间戳）。</para>
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] AgencyServiceFeeAgreementVoidRequest? request)
