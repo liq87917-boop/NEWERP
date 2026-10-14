@@ -29,6 +29,10 @@ namespace ERP.Api.Controllers;
 /// <c>BaseCustomers</c> 行之前都先经实时身份 + 既有客户菜单授权，新增 / 修改另经有界字段校验；
 /// 不新增任何菜单 / 权限 / 用户授权，也不改变 ERP-097 业务员读取范围、指定货代引用语义、
 /// 客户编码唯一索引语义与分页 / 响应契约。</para>
+/// <para>ERP-531：<see cref="CustomerAuthorizationRules.Validate"/> 在写入任何 <c>BaseCustomers</c> 行之前，把
+/// 信用额度 / 定金比例 / 佣金比例按建表脚本声明的 <c>DECIMAL(18,4)</c> 逐位原样判定；量级溢出与第 5 位小数
+/// 一律以既有受控参数错误拒绝（绝不静默取整）。EF 映射（<c>ErpDbContext.Config</c>）同步声明
+/// <c>HasPrecision(18,4)</c>，只对齐精度，不改任何 DDL。</para>
 /// </remarks>
 [ApiController]
 [Route("api/base/customers")]
@@ -116,7 +120,7 @@ public class CustomerController : BaseCrudController<BaseCustomer>
         return c => allowed.Contains(c.Id);
     }
 
-    /// <summary>新增客户（落库前先经实时授权与有界字段校验；指定货代必须是可用的 Forwarder 字典项，名称快照由服务端写入；被拒绝时不落任何行）</summary>
+    /// <summary>新增客户（落库前先经实时授权与有界字段校验，含 ERP-531 的 <c>DECIMAL(18,4)</c> 逐位原样判定；指定货代必须是可用的 Forwarder 字典项，名称快照由服务端写入；被拒绝时不落任何行）</summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] BaseCustomer entity)
     {
@@ -127,7 +131,7 @@ public class CustomerController : BaseCrudController<BaseCustomer>
     }
 
     /// <summary>
-    /// 更新客户（落库前先经实时授权与有界字段校验；指定货代必须是可用的 Forwarder 字典项；
+    /// 更新客户（落库前先经实时授权与有界字段校验，含 ERP-531 的 <c>DECIMAL(18,4)</c> 逐位原样判定；指定货代必须是可用的 Forwarder 字典项；
     /// 引用未变更时保留历史引用，不因字典项停用而清空；被拒绝时不改写任何行）
     /// </summary>
     [HttpPut("{id:long}")]
@@ -173,6 +177,10 @@ public class CustomerController : BaseCrudController<BaseCustomer>
 /// <para>ERP-447 的授权与校验护栏见 <see cref="SupplierAuthorizationRules"/>：每个路由在读取或写入任何
 /// <c>BaseSuppliers</c> 行之前都先经实时身份 + 既有供应商菜单授权，新增 / 修改另经有界字段校验；
 /// 不新增任何菜单 / 权限 / 用户授权，也不改变分页 / 响应契约与供应商编码唯一索引语义。</para>
+/// <para>ERP-531：<see cref="SupplierAuthorizationRules.Validate"/> 在写入任何 <c>BaseSuppliers</c> 行之前，把
+/// 税率 / 返点比例按建表脚本声明的 <c>DECIMAL(18,4)</c> 逐位原样判定；量级溢出与第 5 位小数一律以既有受控
+/// 参数错误拒绝（绝不静默取整）。EF 映射（<c>ErpDbContext.Config</c>）同步声明 <c>HasPrecision(18,4)</c>，
+/// 只对齐精度，不改任何 DDL。</para>
 /// </remarks>
 [ApiController]
 [Route("api/base/suppliers")]
@@ -234,7 +242,7 @@ public class SupplierController : BaseCrudController<BaseSupplier>
         return Ok(ApiResponse<BaseSupplier>.Success(result));
     }
 
-    /// <summary>新增供应商（落库前先经实时授权与有界字段校验；被拒绝时不落任何行）</summary>
+    /// <summary>新增供应商（落库前先经实时授权与有界字段校验，含 ERP-531 的 <c>DECIMAL(18,4)</c> 逐位原样判定；被拒绝时不落任何行）</summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] BaseSupplier entity)
     {
@@ -243,7 +251,7 @@ public class SupplierController : BaseCrudController<BaseSupplier>
         return await base.Create(entity);
     }
 
-    /// <summary>更新供应商（落库前先经实时授权与有界字段校验；被拒绝时不改写任何行）</summary>
+    /// <summary>更新供应商（落库前先经实时授权与有界字段校验，含 ERP-531 的 <c>DECIMAL(18,4)</c> 逐位原样判定；被拒绝时不改写任何行）</summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] BaseSupplier entity)
     {

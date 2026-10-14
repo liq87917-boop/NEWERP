@@ -148,11 +148,11 @@ public class CustomerMasterAuthorizationTests
             CreditDays = creditDays
         };
 
-    /// <summary>客户主表快照（授权 / 校验拒绝后必须逐字节不变）</summary>
+    /// <summary>客户主表快照（授权 / 校验拒绝后必须逐字节不变，含 ERP-531 的定金比例 / 佣金比例列）</summary>
     private static string Snapshot(ErpDbContext db) => string.Join("|",
         db.BaseCustomers.AsNoTracking().OrderBy(x => x.Id)
             .Select(x => $"{x.Id}:{x.Status}:{x.IsDeleted}:{x.CustomerCode}:{x.CustomerName}:{x.Remark}:" +
-                         $"{x.CreditLimit}:{x.EmpId}:{x.CreditDays}")
+                         $"{x.CreditLimit}:{x.DepositRatio}:{x.CommissionRatio}:{x.EmpId}:{x.CreditDays}")
             .ToList());
 
     private static async Task AssertCode(int expected, Func<Task<IActionResult>> action)
@@ -361,6 +361,9 @@ public class CustomerMasterAuthorizationTests
     [InlineData("credit-overflow")]
     [InlineData("deposit-overflow")]
     [InlineData("commission-overflow")]
+    [InlineData("credit-fifth-place")]
+    [InlineData("deposit-fifth-place")]
+    [InlineData("commission-fifth-place")]
     [InlineData("negative-emp")]
     [InlineData("negative-creditdays")]
     [InlineData("status-unknown")]
@@ -382,6 +385,9 @@ public class CustomerMasterAuthorizationTests
             "credit-overflow" => NewCustomer(code: "C-1", name: "名称", creditLimit: 100000000000000m),
             "deposit-overflow" => NewCustomer(code: "C-1", name: "名称", depositRatio: -100000000000000m),
             "commission-overflow" => NewCustomer(code: "C-1", name: "名称", commissionRatio: 100000000000000m),
+            "credit-fifth-place" => NewCustomer(code: "C-1", name: "名称", creditLimit: 100.00005m),
+            "deposit-fifth-place" => NewCustomer(code: "C-1", name: "名称", depositRatio: 1.23455m),
+            "commission-fifth-place" => NewCustomer(code: "C-1", name: "名称", commissionRatio: 0.12505m),
             "negative-emp" => NewCustomer(code: "C-1", name: "名称", empId: -1),
             "negative-creditdays" => NewCustomer(code: "C-1", name: "名称", creditDays: -1),
             _ => NewCustomer(code: "C-1", name: "名称", status: 2)

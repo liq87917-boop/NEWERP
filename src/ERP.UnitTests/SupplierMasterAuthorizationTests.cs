@@ -122,10 +122,11 @@ public class SupplierMasterAuthorizationTests
             RebateRatio = rebateRatio
         };
 
-    /// <summary>供应商主表快照（授权 / 校验拒绝后必须逐字节不变）</summary>
+    /// <summary>供应商主表快照（授权 / 校验拒绝后必须逐字节不变，含 ERP-531 的税率 / 返点比例列）</summary>
     private static string Snapshot(ErpDbContext db) => string.Join("|",
         db.BaseSuppliers.AsNoTracking().OrderBy(x => x.Id)
-            .Select(x => $"{x.Id}:{x.Status}:{x.IsDeleted}:{x.SupplierCode}:{x.SupplierName}:{x.Remark}")
+            .Select(x => $"{x.Id}:{x.Status}:{x.IsDeleted}:{x.SupplierCode}:{x.SupplierName}:{x.Remark}:" +
+                         $"{x.TaxRate}:{x.RebateRatio}")
             .ToList());
 
     private static async Task AssertCode(int expected, Func<Task<IActionResult>> action)
@@ -254,6 +255,8 @@ public class SupplierMasterAuthorizationTests
     [InlineData("remark-too-long")]
     [InlineData("taxrate-overflow")]
     [InlineData("rebate-overflow")]
+    [InlineData("taxrate-fifth-place")]
+    [InlineData("rebate-fifth-place")]
     [InlineData("status-unknown")]
     public async Task Validation_非法载荷_新增与修改均拒绝且零写入(string scenario)
     {
@@ -271,6 +274,8 @@ public class SupplierMasterAuthorizationTests
             "remark-too-long" => NewSupplier(code: "S-1", name: "名称", remark: new string('R', SupplierAuthorizationRules.MaxRemarkLength + 1)),
             "taxrate-overflow" => NewSupplier(code: "S-1", name: "名称", taxRate: 100000000000000m),
             "rebate-overflow" => NewSupplier(code: "S-1", name: "名称", rebateRatio: -100000000000000m),
+            "taxrate-fifth-place" => NewSupplier(code: "S-1", name: "名称", taxRate: 1.00005m),
+            "rebate-fifth-place" => NewSupplier(code: "S-1", name: "名称", rebateRatio: 1.23455m),
             _ => NewSupplier(code: "S-1", name: "名称", status: 2)
         };
 

@@ -16,12 +16,14 @@ namespace ERP.Application.Services;
 /// 都重新解析实时身份（缺失 / 非法 / 账号不存在或已删除按未认证，禁用按权限不足）与既有
 /// 「客户资料」（<c>customer</c>）功能菜单授权（缺菜单 / 被撤销按权限不足），一律 fail closed；</item>
 /// <item><b>有界字段校验</b>（<see cref="Validate"/>）：新增 / 修改在落库之前校验客户编码与名称非空且在
-/// 持久化长度上限内、可选文本字段不超持久化长度、信用额度 / 定金比例 / 佣金比例落在
-/// <c>DECIMAL(18,4)</c> 可存储范围内、业务员 Id 与账期天数为已知的<b>非负</b>形状、
-/// 状态为已知的 <c>1</c>（启用）/ <c>0</c>（停用）；被拒绝的写入不落任何行。</item>
+/// 持久化长度上限内、可选文本字段不超持久化长度、信用额度 / 定金比例 / 佣金比例能在
+/// <c>DECIMAL(18,4)</c> 列内逐位原样存储（量级与小数位同时判定，ERP-531）、业务员 Id 与账期天数为已知的
+/// <b>非负</b>形状、状态为已知的 <c>1</c>（启用）/ <c>0</c>（停用）；被拒绝的写入不落任何行。</item>
 /// </list>
 /// <para>边界（重要）：本护栏只新增「读取 / 写入前的判定」，<b>不</b>静默截断 / 夹取或改写任何客户字段，
 /// 也<b>不</b>改变既有客户编码唯一索引语义、分页 / 响应契约与 <see cref="GenericService{TEntity}"/> 契约；
+/// ERP-531 只在 EF 模型上为 <c>CreditLimit</c> / <c>DepositRatio</c> / <c>CommissionRatio</c> 声明
+/// <c>DECIMAL(18,4)</c> 精度（<b>不</b>执行任何列类型迁移 / DDL）；
 /// ERP-097 业务员读取范围与 <see cref="CustomerForwarderService"/> 的指定货代引用语义（引用未变更时保留历史引用、
 /// 客户端自由文本一律不被采信）均保持不变；<b>不</b>新增任何表 / 列 / 实体 / 菜单 / 权限 / 用户授权，
 /// 不伪造任何授权，<b>不</b>因身份缺失而降级为管理员，也<b>不</b>新增匿名 / 特权旁路。</para>
@@ -102,10 +104,16 @@ public static class CustomerAuthorizationRules
 
     /// <summary>
     /// 客户数值列的持久化可存储上限（<c>DECIMAL(18,4)</c>：14 位整数 + 4 位小数），
-    /// 超出即无法落库，必须在写入前按参数错误拒绝。适用于 <c>CreditLimit</c> / <c>DepositRatio</c> /
-    /// <c>CommissionRatio</c>。
+    /// 超出即无法落库，必须在写入任何 <c>BaseCustomers</c> 行之前按参数错误拒绝。适用于 <c>CreditLimit</c> /
+    /// <c>DepositRatio</c> / <c>CommissionRatio</c>（与建表脚本的 <c>DECIMAL(18,4)</c> 及 ERP-531 的 EF 映射同源）。
     /// </summary>
     public const decimal MaxDecimalMagnitude = 99999999999999.9999m;
+
+    /// <summary>
+    /// 客户数值列的实际小数位（<c>DECIMAL(18,4)</c>，与建表脚本 / ERP-531 EF 映射同源）：
+    /// 小数位超过该值即无法<b>逐位原样</b>落库，必须在写入之前受控拒绝，绝不静默取整 / 截断。
+    /// </summary>
+    public const int PersistedDecimalScale = 4;
 
     /// <summary>已知启用状态（<c>BaseCustomer.Status = 1</c>）</summary>
     public const int EnabledStatus = 1;
@@ -195,7 +203,9 @@ public static class CustomerAuthorizationRules
     /// <item>客户编码：非空且 ≤ <see cref="MaxCustomerCodeLength"/>；</item>
     /// <item>客户名称：非空且 ≤ <see cref="MaxCustomerNameLength"/>；</item>
     /// <item>可选文本字段：不超各自持久化长度上限；</item>
-    /// <item>信用额度 / 定金比例 / 佣金比例：落在 <c>DECIMAL(18,4)</c> 可存储范围内（<see cref="MaxDecimalMagnitude"/>）；</item>
+    /// <item>信用额度 / 定金比例 / 佣金比例：能在 <c>DECIMAL(18,4)</c> 列内**逐位原样**存储（绝对值 ≤
+    /// <see cref="MaxDecimalMagnitude"/> 且小数位 ≤ <see cref="PersistedDecimalScale"/>，ERP-531）——
+    /// 量级溢出与第 5 位小数一律拒绝，绝不静默取整；</item>
     /// <item>业务员 Id（<c>EmpId</c>）与账期天数（<c>CreditDays</c>）：已知的非负形状（可空，0 = 未指定 / 现结）；</item>
     /// <item>状态：仅接受 <see cref="EnabledStatus"/>（启用）或 <see cref="DisabledStatus"/>（停用）。</item>
     /// </list>
@@ -261,12 +271,26 @@ public static class CustomerAuthorizationRules
             throw BusinessException.InvalidParameter($"客户{fieldText}长度不能超过 {maxLength} 个字符");
     }
 
-    /// <summary>数值列校验：数值必须能落在持久化 <c>DECIMAL(18,4)</c> 范围内（不做静默夹取）。</summary>
+    /// <summary>
+    /// 判断一个 decimal 能否在客户数值列（<c>DECIMAL(18,4)</c>）内<b>逐位原样</b>存储：
+    /// 绝对值不超过 <see cref="MaxDecimalMagnitude"/> 且小数位不超过 <see cref="PersistedDecimalScale"/>。
+    /// <para>纯判定：绝不取整、截断或改写入参；第 5 位小数（如 <c>0.12505</c>）与量级溢出（如 <c>1e14</c>）一律
+    /// <c>false</c>；恰好等于 ±<see cref="MaxDecimalMagnitude"/> 的值放行。</para>
+    /// </summary>
+    public static bool IsPersistedDecimalRepresentable(decimal value)
+        => value >= -MaxDecimalMagnitude && value <= MaxDecimalMagnitude
+           && decimal.Round(value, PersistedDecimalScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 数值列校验：数值必须能在持久化 <c>DECIMAL(18,4)</c> 列内**逐位原样**存储（量级与小数位同时判定），
+    /// 不可原样存储即按既有受控参数错误拒绝（<b>不做静默夹取，也不静默取整</b>）。
+    /// </summary>
     private static void EnsurePersistedDecimal(decimal value, string column, string fieldText)
     {
-        if (value > MaxDecimalMagnitude || value < -MaxDecimalMagnitude)
+        if (!IsPersistedDecimalRepresentable(value))
             throw BusinessException.InvalidParameter(
-                $"客户{fieldText}（{column}）超出可存储范围（DECIMAL(18,4)），请填写 {MaxDecimalMagnitude} 以内的数值");
+                $"客户{fieldText}（{column}）超出可存储范围（DECIMAL(18,4)：绝对值不超过 {MaxDecimalMagnitude} " +
+                $"且小数位不超过 {PersistedDecimalScale}），请调整后再提交");
     }
 
     /// <summary>可选整数列校验：可空；非空时必须为已知的非负形状（不做静默夹取 / 改写）。</summary>
