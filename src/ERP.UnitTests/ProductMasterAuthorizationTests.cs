@@ -362,6 +362,7 @@ public class ProductMasterAuthorizationTests
     [InlineData("factory-item-no-too-long")]
     [InlineData("remark-too-long")]
     [InlineData("decimal-too-large")]
+    [InlineData("decimal-fifth-place")]
     [InlineData("units-per-package-negative")]
     [InlineData("min-order-qty-negative")]
     [InlineData("status-unknown")]
@@ -420,6 +421,7 @@ public class ProductMasterAuthorizationTests
             p => p.FactoryItemNo = new string('Y', ProductAuthorizationRules.MaxFactoryItemNoLength + 1)),
         "remark-too-long" => NewProduct(remark: new string('R', ProductAuthorizationRules.MaxRemarkLength + 1)),
         "decimal-too-large" => NewProduct(salePrice: ProductAuthorizationRules.MaxDecimalMagnitude + 1m),
+        "decimal-fifth-place" => NewProduct(salePrice: 1.00005m),
         "units-per-package-negative" => NewProduct(unitsPerPackage: -1),
         "min-order-qty-negative" => NewProduct(minOrderQty: -1),
         _ => NewProduct(status: 2)

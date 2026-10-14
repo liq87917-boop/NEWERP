@@ -594,6 +594,10 @@ public class WarehouseController : BaseCrudController<BaseWarehouse>
 /// 每个路由在读取、写入或产出任何产物之前都先经实时身份 + 既有商品菜单授权，新增 / 修改另经有界字段校验；
 /// 不新增任何菜单 / 权限 / 用户授权，也不改变 ERP-037 规格变体、ERP-038 货源关系、商品编码唯一索引语义
 /// 与分页 / 导出 / 上传响应契约。
+/// <para>ERP-530：<see cref="ProductAuthorizationRules.Validate"/> 在写入任何 <c>BaseProducts</c> 行之前，把
+/// 全部持久化 decimal 列（价格 / 尺寸 / 重量 / 体积 / 退税率 / 安全库存 / 库存上限）按建表脚本声明的
+/// <c>DECIMAL(18,4)</c> 逐位原样判定；量级溢出与第 5 位小数一律以既有受控参数错误拒绝（绝不静默取整）。
+/// EF 映射（<c>ErpDbContext.Config</c>）同步声明 <c>HasPrecision(18,4)</c>，只对齐精度，不改任何 DDL。</para>
 /// </remarks>
 [ApiController]
 [Route("api/base/products")]
@@ -670,7 +674,7 @@ public class ProductController : BaseCrudController<BaseProduct>
         return Ok(ApiResponse<BaseProduct>.Success(result));
     }
 
-    /// <summary>新增商品（落库前先经实时授权与有界字段校验；被拒绝时不落任何行）</summary>
+    /// <summary>新增商品（落库前先经实时授权与有界字段校验，含 ERP-530 的 <c>DECIMAL(18,4)</c> 逐位原样判定；被拒绝时不落任何行）</summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] BaseProduct entity)
     {
@@ -679,7 +683,7 @@ public class ProductController : BaseCrudController<BaseProduct>
         return await base.Create(entity);
     }
 
-    /// <summary>更新商品（落库前先经实时授权与有界字段校验；被拒绝时不改写任何行）</summary>
+    /// <summary>更新商品（落库前先经实时授权与有界字段校验，含 ERP-530 的 <c>DECIMAL(18,4)</c> 逐位原样判定；被拒绝时不改写任何行）</summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] BaseProduct entity)
     {

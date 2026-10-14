@@ -34,6 +34,34 @@ public partial class ErpDbContext
         modelBuilder.Entity<BaseProduct>().HasIndex(p => p.ProductCode).IsUnique();
         modelBuilder.Entity<BaseOtherInfo>().HasIndex(o => new { o.InfoType, o.InfoCode }).IsUnique();
 
+        // ============ ERP-530：商品主数据的实际存储精度（与建表脚本 / docs 的 DECIMAL(18,4) 同源） ============
+        // 设计口径：
+        //   1. 商品主数据是报价 / PI / 订单 / 库存 / 装柜 / 报表共同解析的权威对象，其价格 / 尺寸 / 重量 / 体积 /
+        //      退税率 / 安全库存（MinStock / MaxStock）等列由权威建表脚本（SchemaUpgrader 第 12.3 段与第 17 段）
+        //      声明为 DECIMAL(18,4)（14 位整数 + 4 位小数）；
+        //   2. EF 模型此前**未**显式 HasPrecision，按 SQL Server 默认精度把这些列映射为 decimal(18,2)，于是合法的
+        //      3 / 4 位小数（如体积 0.0125、退税率 13.0555）在到达 SQL 之前被静默取整到 2 位，与实际列声明不一致，
+        //      丢失装运与税务证据；
+        //   3. 这里显式声明精度让模型映射与权威列声明**逐字一致**（与 BaseProductSupplier.MinOrderQty 同一处理），
+        //      合法的 4 位小数原样往返；不可原样存储的值由 ProductAuthorizationRules 在写入任何行之前受控拒绝；
+        //   4. 只声明精度：不新增表 / 列 / 索引 / 菜单 / 权限，不改任何列类型与 DDL。
+        modelBuilder.Entity<BaseProduct>().Property(x => x.PurchasePrice).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.SalePrice).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.CostPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.Weight).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.Volume).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.Length).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.Width).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.Height).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.OuterLength).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.OuterWidth).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.OuterHeight).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.OuterWeight).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.VolumeWeight).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.RefundRate).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.MinStock).HasPrecision(18, 4);
+        modelBuilder.Entity<BaseProduct>().Property(x => x.MaxStock).HasPrecision(18, 4);
+
         // ============ ERP-036：客户「指定货代」（引用「其他资料」Forwarder 字典项） ============
         // 设计口径：
         //   1. 只存引用 Id + 名称快照，**刻意不建外键**：字典项允许被软删除 / 停用，

@@ -85,10 +85,17 @@ public static class ProductAuthorizationRules
 
     /// <summary>
     /// 商品数值列的持久化可存储上限（<c>DECIMAL(18,4)</c>：14 位整数 + 4 位小数），
-    /// 超出即无法落库，必须在写入前按参数错误拒绝。适用于价格 / 尺寸 / 重量 / 体积 / 退税率 / 安全库存等全部
-    /// decimal 列（与「阶段 1 补齐」建表脚本的 <c>DECIMAL(18,4)</c> 同源）。
+    /// 超出即无法落库，必须在写入任何 <c>BaseProducts</c> 行之前按参数错误拒绝。适用于价格 / 尺寸 / 重量 /
+    /// 体积 / 退税率 / 安全库存（<c>MinStock</c> / <c>MaxStock</c>）等全部 decimal 列
+    /// （与建表脚本的 <c>DECIMAL(18,4)</c> 及 ERP-530 的 EF 映射同源）。
     /// </summary>
     public const decimal MaxDecimalMagnitude = 99999999999999.9999m;
+
+    /// <summary>
+    /// 商品数值列的实际小数位（<c>DECIMAL(18,4)</c>，与建表脚本 / ERP-530 EF 映射同源）：
+    /// 小数位超过该值即无法<b>逐位原样</b>落库，必须在写入之前受控拒绝，绝不静默取整 / 截断。
+    /// </summary>
+    public const int PersistedDecimalScale = 4;
 
     /// <summary>已知启用状态（<c>BaseProduct.Status = 1</c>）</summary>
     public const int EnabledStatus = 1;
@@ -180,8 +187,9 @@ public static class ProductAuthorizationRules
     /// <item>商品名称：非空且 ≤ <see cref="MaxProductNameLength"/>；</item>
     /// <item>可选文本字段（英文名称 / 规格 / 单位 / 分类 / 海关编码 / 条码 / 图片地址 / 装箱单位 / 换算说明 /
     /// 报关品名 / 品牌 / 认证 / 客户货号 / 工厂货号 / 备注）：不超各自持久化长度上限；</item>
-    /// <item>decimal 数值字段（价格 / 尺寸 / 重量 / 体积 / 退税率 / 安全库存 / 库存上限）：落在
-    /// <c>DECIMAL(18,4)</c> 可存储范围内（<see cref="MaxDecimalMagnitude"/>）；</item>
+    /// <item>decimal 数值字段（价格 / 尺寸 / 重量 / 体积 / 退税率 / 安全库存 / 库存上限）：能在
+    /// <c>DECIMAL(18,4)</c> 列内**逐位原样**存储（绝对值 ≤ <see cref="MaxDecimalMagnitude"/> 且小数位 ≤
+    /// <see cref="PersistedDecimalScale"/>，ERP-530）——量级溢出与第 5 位小数一律拒绝，绝不静默取整；</item>
     /// <item>整数列（装箱数 <c>UnitsPerPackage</c>、起订量 <c>MinOrderQty</c>）：已知的非负形状（0 = 未指定）；</item>
     /// <item>状态：仅接受 <see cref="EnabledStatus"/>（启用）或 <see cref="DisabledStatus"/>（停用）。</item>
     /// </list>
@@ -254,12 +262,26 @@ public static class ProductAuthorizationRules
             throw BusinessException.InvalidParameter($"商品{fieldText}长度不能超过 {maxLength} 个字符");
     }
 
-    /// <summary>数值列校验：数值必须能落在持久化 <c>DECIMAL(18,4)</c> 范围内（不做静默夹取）。</summary>
+    /// <summary>
+    /// 判断一个 decimal 能否在商品数值列（<c>DECIMAL(18,4)</c>）内<b>逐位原样</b>存储：
+    /// 绝对值不超过 <see cref="MaxDecimalMagnitude"/> 且小数位不超过 <see cref="PersistedDecimalScale"/>。
+    /// <para>纯判定：绝不取整、截断或改写入参；第 5 位小数（如 <c>0.00001</c>）与量级溢出（如 <c>1e14</c>）一律
+    /// <c>false</c>；恰好等于 ±<see cref="MaxDecimalMagnitude"/> 的值放行。</para>
+    /// </summary>
+    public static bool IsPersistedDecimalRepresentable(decimal value)
+        => value >= -MaxDecimalMagnitude && value <= MaxDecimalMagnitude
+           && decimal.Round(value, PersistedDecimalScale, MidpointRounding.AwayFromZero) == value;
+
+    /// <summary>
+    /// 数值列校验：数值必须能在持久化 <c>DECIMAL(18,4)</c> 列内**逐位原样**存储（量级与小数位同时判定），
+    /// 不可原样存储即按既有受控参数错误拒绝（<b>不做静默夹取，也不静默取整</b>）。
+    /// </summary>
     private static void EnsurePersistedDecimal(decimal value, string column, string fieldText)
     {
-        if (value > MaxDecimalMagnitude || value < -MaxDecimalMagnitude)
+        if (!IsPersistedDecimalRepresentable(value))
             throw BusinessException.InvalidParameter(
-                $"商品{fieldText}（{column}）超出可存储范围（DECIMAL(18,4)），请填写 {MaxDecimalMagnitude} 以内的数值");
+                $"商品{fieldText}（{column}）超出可存储范围（DECIMAL(18,4)：绝对值不超过 {MaxDecimalMagnitude} " +
+                $"且小数位不超过 {PersistedDecimalScale}），请调整后再提交");
     }
 
     /// <summary>整数列校验：必须为已知的非负形状（0 = 未指定），负数即拒绝（不做静默夹取 / 改写）。</summary>
