@@ -1,0 +1,85 @@
+{
+  "title": "Preserve base-unit meaning of stock count book and actual quantities",
+  "description": "Close stock adjustment unit corruption: StockAdjustmentPostingRules.EnsureLiveMasterDataAsync checks only live warehouse/product. Approve compares BookQuantity to base inventory, computes ActualQuantity minus BookQuantity then overwrites d.Unit with product.Unit and posts difference unchanged. Explicit package/arbitrary labels are not validated. Keep count quantities and costs in established base units, reject mislabeled drafts and commitments; do not convert book or actual counts, infer a baseline or change signed differences. Preserve stale-count checks, positive/negative/zero difference behavior and atomic audit/reversal. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+    "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+    "docs/stock-adjustment-unit-integrity.md",
+    "src/ERP.UnitTests/InventoryMovementTests.cs",
+    "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+    "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+    "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+    "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+    "src/ERP.UnitTests/StockAdjustmentUnitIntegrityTests.cs",
+    "src/ERP.IntegrationTests/StockAdjustmentUnitIntegritySqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Create/update validate explicitly supplied detail units against the live product base unit before numbering, tracked replacement or persistence. This flow already measures quantities in base units: reject nonempty package/arbitrary units without converting quantities or costs; retain documented blank-unit fallback, trimmed case-insensitive base input and server-owned identities. A nonempty unit with missing base configuration fails controlled.",
+    "Submit/approve recheck stored effective units inside existing document/inventory locks before status or ledger mutation. Preserve permission checks, current inventory baseline and cost/quantity rules, source semantics and atomicity. Invalid requests change no document/detail/status/number/stock/movement. Historical read and reversal semantics remain available without newly introduced eligibility gates.",
+    "Meaningful unit/controller plus genuine isolated SQL exercise base/blank/case/whitespace, package and arbitrary invalid labels, edited product base before commitment, rollback and unchanged balances/audit, existing concurrency/posting/reversal regressions. Safe Release/full units required; record actual environment and full unique logs, no phase acceptance claim."
+  ],
+  "criterion_path_map": {
+    "Create/update validate explicitly supplied detail units against the live product base unit before numbering, tracked replacement or persistence. This flow already measures quantities in base units: reject nonempty package/arbitrary units without converting quantities or costs; retain documented blank-unit fallback, trimmed case-insensitive base input and server-owned identities. A nonempty unit with missing base configuration fails controlled.": [
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "docs/stock-adjustment-unit-integrity.md",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentUnitIntegrityTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentUnitIntegritySqlServerTests.cs"
+    ],
+    "Submit/approve recheck stored effective units inside existing document/inventory locks before status or ledger mutation. Preserve permission checks, current inventory baseline and cost/quantity rules, source semantics and atomicity. Invalid requests change no document/detail/status/number/stock/movement. Historical read and reversal semantics remain available without newly introduced eligibility gates.": [
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "docs/stock-adjustment-unit-integrity.md",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentUnitIntegrityTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentUnitIntegritySqlServerTests.cs"
+    ],
+    "Meaningful unit/controller plus genuine isolated SQL exercise base/blank/case/whitespace, package and arbitrary invalid labels, edited product base before commitment, rollback and unchanged balances/audit, existing concurrency/posting/reversal regressions. Safe Release/full units required; record actual environment and full unique logs, no phase acceptance claim.": [
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "docs/stock-adjustment-unit-integrity.md",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentNumericBoundsTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentNumericBoundsSqlServerTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "src/ERP.UnitTests/StockAdjustmentUnitIntegrityTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentUnitIntegritySqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "StockAdjustmentController:270 checks base inventory baseline;277-292 overwrites unit then posts difference. EnsureLiveMasterDataAsync has no unit comparison. ERP-507 protects numeric storage and ERP-355 stale counts, neither protects explicit nonbase labels. Reviewed all task history plus stock-adjustment docs.",
+  "depends_on": [
+    "ERP-525",
+    "ERP-507",
+    "ERP-355"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-526",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T05:43:42.534892Z"
+}
