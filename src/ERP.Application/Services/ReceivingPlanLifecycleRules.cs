@@ -19,7 +19,9 @@ namespace ERP.Application.Services;
 /// <para><b>实时主数据与边界</b>：新增 / 修改 / 提交 / 审核 / 取消 / 删除之前，供应商必须真实可用
 /// （存在、未删除、启用，且 <c>SupplierId &gt; 0</c>）；可选目的港（<c>PortId</c>）填写时必须指向启用且未删除的
 /// 港口字典项（<c>BaseOtherInfo.InfoType = Port</c>）；柜型必须是已知 <see cref="ContainerType"/> 枚举；
-/// 订柜单号 / 柜号 / 目的地 / 备注按实体长度上限去首尾空白后有界。总件数仅在<b>提交 / 审核</b>时要求为正数。</para>
+/// 订柜单号 / 柜号 / 目的地 / 备注按实体长度上限去首尾空白后有界。总件数（<c>TotalQuantity</c>）在<b>任何写入之前</b>
+/// 都必须可在实际列精度 <c>DECIMAL(18,2)</c> 内原样存储（过精度 / 溢出受控拒绝，绝不静默截断 / 取整）；
+/// <b>草稿（新增 / 修改）</b>照常允许可表示的 <c>0</c> 与负数，<b>提交 / 审核</b>才额外要求正数。</para>
 /// <para><b>订柜单号只是显式 legacy 文本</b>：<see cref="ContainerReceivingPlan.BookingNo"/> 保留为历史文本，
 /// 本护栏<b>绝不</b>按单号等自由文本反查 <c>ContainerBooking</c>、绝不臆造订柜链接，也绝不把收货计划审核
 /// 当成收货 / 入库 / 出运：不写库存 / 库存流水 / 财务 / 单证，不调用任何外部系统。</para>
@@ -49,6 +51,26 @@ public static class ReceivingPlanLifecycleRules
     /// <summary>备注长度上限（与 <see cref="ContainerReceivingPlan.Remark"/> 的 <c>MaxLength</c> 同源）</summary>
     public const int RemarkMaxLength = 500;
 
+    /// <summary>
+    /// 总件数列的实际精度（<c>DECIMAL(18,2)</c>）：<see cref="ContainerReceivingPlan.TotalQuantity"/> 在 EF 模型中
+    /// 未显式 <c>HasPrecision</c>，因此按 SQL Server 提供程序默认精度落库为 <c>DECIMAL(18,2)</c>。
+    /// </summary>
+    public const int QuantityPrecision = 18;
+
+    /// <summary>总件数列的实际小数位（<c>DECIMAL(18,2)</c>，与 <see cref="QuantityPrecision"/> 同源）。</summary>
+    public const int QuantityScale = 2;
+
+    /// <summary><c>DECIMAL(18,2)</c> 的最大可表示总件数（16 位整数 + 2 位小数）。</summary>
+    public const decimal MaxQuantity = 9_999_999_999_999_999.99m;
+
+    /// <summary><c>DECIMAL(18,2)</c> 的最小可表示总件数。</summary>
+    public const decimal MinQuantity = -9_999_999_999_999_999.99m;
+
+    /// <summary>总件数超出实际列精度时的拒绝文案（接口 / 文档同源）。</summary>
+    public const string QuantityStorageText =
+        "收货计划总件数（TotalQuantity）必须可在实际列精度 DECIMAL(18,2) 内原样存储（至多 2 位小数且有界）：" +
+        "已拒绝，绝不静默截断或取整";
+
     /// <summary>未映射业务员的受限账号拒绝文案（fail closed，不泄露任何范围外单据，也不降级为全局可见）</summary>
     public const string UnmappedOperatorText =
         "当前账号未映射为业务员（收货计划操作员），不能访问收货计划（fail closed，不泄露任何范围外单据）";
@@ -68,7 +90,8 @@ public static class ReceivingPlanLifecycleRules
     public const string BoundaryText =
         "新增 / 修改 / 提交 / 审核 / 取消 / 删除之前，供应商必须为正整数且真实可用（存在、未删除、已启用），" +
         "可选目的港必须是启用且未删除的港口字典项（BaseOtherInfo.InfoType = Port），柜型必须是已知枚举，" +
-        "订柜单号 / 柜号 / 目的地 / 备注去首尾空白后有界，总件数在提交 / 审核时为正数；" +
+        "订柜单号 / 柜号 / 目的地 / 备注去首尾空白后有界，总件数在提交 / 审核时为正数、" +
+        "且任何写入前必须可在实际列精度 DECIMAL(18,2) 内原样存储（草稿可暂存可表示的 0 / 负数）；" +
         "订柜单号只作显式 legacy 文本保留，绝不按单号推断订柜链接，也绝不把审核当收货 / 入库 / 出运；" +
         "本护栏不新增任何表 / 列 / 菜单 / 权限，不写库存 / 财务 / 单证，不调用外部系统。" +
         "状态变更共用同一把收货计划行锁与可串行化事务，历史主数据不可用时读取照常并给出显式证据。";
@@ -174,9 +197,35 @@ public static class ReceivingPlanLifecycleRules
                 $"柜型无效：{(int)containerType}（应为 20GP / 40GP / 40HQ / 45HQ / 散货(0) 之一）");
     }
 
-    /// <summary>提交 / 审核前总件数必须为正数（草稿可暂存 0 / 负数，但不能提交 / 审核）。</summary>
+    /// <summary>
+    /// 校验（并按原值返回）总件数可被数据库原样存储；过精度（超过 2 位小数）或溢出
+    /// <c>DECIMAL(18,2)</c> 时抛受控参数错误（<c>1001</c>），绝不静默截断 / 取整。
+    /// <para>纯函数：不改写任何值、不访问数据库、不涉及单据状态；<c>0</c> 与可表示的负数照常放行
+    /// （既有草稿口径保持不变），正数门槛由 <see cref="EnsureQuantityPositive"/> 在同一表示区间之上追加。</para>
+    /// </summary>
+    public static decimal EnsureQuantityRepresentable(decimal totalQuantity)
+    {
+        if (!IsQuantityRepresentable(totalQuantity))
+            throw BusinessException.InvalidParameter($"{QuantityStorageText}（当前值 {totalQuantity}）");
+        return totalQuantity;
+    }
+
+    /// <summary>
+    /// 总件数是否可在实际列精度 <c>DECIMAL(18,2)</c> 内**原样**表示（至多 2 位小数且绝对值有界）。
+    /// <para>纯判定：不取整、不截断、不改写任何值；<c>0</c> 与可表示的负数草稿值返回 <c>true</c>，
+    /// 过精度 / 溢出值返回 <c>false</c>。</para>
+    /// </summary>
+    public static bool IsQuantityRepresentable(decimal totalQuantity)
+        => decimal.Round(totalQuantity, QuantityScale) == totalQuantity
+           && totalQuantity >= MinQuantity && totalQuantity <= MaxQuantity;
+
+    /// <summary>
+    /// 提交 / 审核前总件数必须**可原样存储且为正数**（草稿仍可暂存可表示的 0 / 负数，但不能提交 / 审核）：
+    /// 先做存储表示区间判定，再要求 <c>&gt; 0</c>；被拒时计划数量 / 状态 / 单号 / 下游证据一律不变。
+    /// </summary>
     public static void EnsureQuantityPositive(decimal totalQuantity)
     {
+        EnsureQuantityRepresentable(totalQuantity);
         if (totalQuantity <= 0m)
             throw BusinessException.InvalidParameter(
                 "收货计划提交 / 审核前总件数必须为正数（TotalQuantity > 0）");
@@ -193,9 +242,9 @@ public static class ReceivingPlanLifecycleRules
 
     /// <summary>
     /// 校验并规范化「完整的拟提交内容」，返回**游离快照**（不触碰任何被跟踪实体）：
-    /// 供应商实时可用 → 目的港实时可用 → 柜型为已知枚举 → 文本字段去空白并有界。
+    /// 供应商实时可用 → 目的港实时可用 → 柜型为已知枚举 → 总件数可原样存储（<c>DECIMAL(18,2)</c>）→ 文本字段去空白并有界。
     /// 调用方必须先通过 <see cref="EnsureAuthorizedAsync"/>，并在本方法成功后才把快照复制到被跟踪实体
-    /// （见 <see cref="ApplyValidated"/>），从而保证「被拒绝的修改不改变库中收货计划 / 状态」。
+    /// （见 <see cref="ApplyValidated"/>），从而保证「被拒绝的修改不改变库中收货计划 / 状态」，且校验严格先于单据号生成。
     /// </summary>
     public static async Task<ContainerReceivingPlan> ValidateProposedAsync(
         IErpDbContext db, ContainerReceivingPlan proposed, CancellationToken ct = default)
@@ -217,7 +266,8 @@ public static class ReceivingPlanLifecycleRules
             ExpectedArrivalDate = proposed.ExpectedArrivalDate,
             PortId = proposed.PortId,
             Destination = NormalizeBounded(proposed.Destination, DestinationMaxLength, "目的地"),
-            TotalQuantity = proposed.TotalQuantity,
+            // 总件数：草稿可暂存可表示的 0 / 负数，但过精度 / 溢出必须在此（单号生成与任何写入之前）受控拒绝。
+            TotalQuantity = EnsureQuantityRepresentable(proposed.TotalQuantity),
             Remark = NormalizeBounded(proposed.Remark, RemarkMaxLength, "备注"),
         };
     }
