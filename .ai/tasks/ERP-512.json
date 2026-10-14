@@ -1,0 +1,113 @@
+{
+  "title": "Validate expense scalar storage and derived allocation amounts before generation",
+  "description": "Close expense CRUD and legacy/current allocation write overflow/representation gaps. ExpenseAuthorizationRules.NormalizeAmount/NormalizeRate round to existing2 decimals and only check positive, so unlimited positive values reach actual default decimal(18,2). EnsureExpenseWriteValidAsync validates proposed.Amount/rate but not every persisted scalar amount. ExpenseBillController legacy Allocate computes AmountCny inline via multiplication after adding each FinanceExpense; ContainerExpenseAllocationRules.ConvertToCny and service generated lines similarly can overflow actual AmountCny/AllocatedAmountCny columns. Validate actual EF precision of Amount/TaxAmount/AllocatedAmount/AmountCny and rate, including current batch ExchangeRate18,6, without inventing tax equations or changing historical expense currency rounding. Precompute and validate every generated line and header before numbering/Db.Add; reject atomically rather than partially tracking a batch. Keep original allocation residual and ratio algorithm, persisted-column precision and supported zero tax/optional allocation values. Preview and generate must share controlled derived calculation boundaries; no automatic tax/rate correction or schema changes. Reuse existing scalar FinancePersistedAmountRules where actual columns match; never cap global CurrencyAmountRules.RoundAmount, historical read-only aggregate totals or legitimate multi-document sums. Preserve supported currencies, AwayFromZero rounding, nullable source semantics, existing ownership/menu/customer authority and source locks. Do not require unrelated master-maintenance grants. No schema/migration changes or production access. Preserve historical reads and void/cancel/reversal semantics without new draft validation gates. Adapt all necessary original unit/SQL fixtures with genuine live identities/masters, preserving original assertions. Full original failure logs retained; explicit logs/TRX/results under .ai/logs/<task> only. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ExpenseBillController.cs",
+    "src/ERP.Api/Controllers/ExpenseAllocateDtos.cs",
+    "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+    "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationRules.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+    "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+    "docs/expense-persisted-numeric-bounds.md",
+    "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+    "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+    "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseInvoiceTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+    "src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/ExpensePersistedNumericBoundsSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Expense authorized CRUD validates all client-persisted numeric scalars against real EF/SQL precision after existing normalization. Preserve positive primary amount/rate, supported zero optional tax/allocation fields and original currency precision, with no invented fiscal equations or permission changes.",
+    "Legacy allocation and current source-expense batch preview/generate safely validate derived line/header amounts, exchange rate, CNY multiplication and residual totals against each actual target column before number reservation or tracked mutation; current source locks and zero-partial-write behavior retained. Invalidated stored sources refuse new generation without rewriting history; original void/cancel and historical reads remain.",
+    "Meaningful unit/controller/service and genuine isolated SQL tests verify actual column precision, representable bounds, huge/rounded-over inputs, multiplication/sum overflow, zero optional values, original currency/rate precision, valid manual/legacy/current allocation and rejected zero numbering/expense/batch/evidence changes. Preserve allocation residual sums/ratio/source ownership/concurrency assertions; safe Release/full units and original SQL regressions."
+  ],
+  "criterion_path_map": {
+    "Expense authorized CRUD validates all client-persisted numeric scalars against real EF/SQL precision after existing normalization. Preserve positive primary amount/rate, supported zero optional tax/allocation fields and original currency precision, with no invented fiscal equations or permission changes.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ExpenseAllocateDtos.cs",
+      "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+      "docs/expense-persisted-numeric-bounds.md",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/ExpensePersistedNumericBoundsSqlServerTests.cs"
+    ],
+    "Legacy allocation and current source-expense batch preview/generate safely validate derived line/header amounts, exchange rate, CNY multiplication and residual totals against each actual target column before number reservation or tracked mutation; current source locks and zero-partial-write behavior retained. Invalidated stored sources refuse new generation without rewriting history; original void/cancel and historical reads remain.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ExpenseAllocateDtos.cs",
+      "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+      "docs/expense-persisted-numeric-bounds.md",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/ExpensePersistedNumericBoundsSqlServerTests.cs"
+    ],
+    "Meaningful unit/controller/service and genuine isolated SQL tests verify actual column precision, representable bounds, huge/rounded-over inputs, multiplication/sum overflow, zero optional values, original currency/rate precision, valid manual/legacy/current allocation and rejected zero numbering/expense/batch/evidence changes. Preserve allocation residual sums/ratio/source ownership/concurrency assertions; safe Release/full units and original SQL regressions.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ExpenseAllocateDtos.cs",
+      "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Application/Services/FinancePersistedAmountRules.cs",
+      "docs/expense-persisted-numeric-bounds.md",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/ExpensePersistedNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/ExpensePersistedNumericBoundsSqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "ExpenseAuthorizationRules.NormalizeAmount:149 and NormalizeRate:158 only round/check>0; EnsureExpenseWriteValidAsync:268-269 calls those. ExpenseBillController:107-118 persists inline amount/rate/CNY product without scalar bounds. ContainerExpenseAllocationService:443/466 uses ConvertToCny, then :641-704 persists rate/CNY amounts. Config:267 batchrate18,6; :268-269 and :296-297 amounts18,2. FinanceExpense decimal fields default18,2. ERP-042/388/389/496 protect allocation semantics and authority, not persisted scalar/derived overflow. No duplicate expense representability task found.",
+  "depends_on": [
+    "ERP-511",
+    "ERP-042",
+    "ERP-496"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-512",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T01:25:24.143013Z"
+}
