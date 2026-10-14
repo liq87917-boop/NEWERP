@@ -20,6 +20,9 @@ namespace ERP.Api.Controllers;
 ///    ERP-503：<b>无论是否显式链接来源</b>，创建 / 修改在单号预约与任何明细写入之前都会校验草稿形状
 ///    （正数量与 DECIMAL(18,4) 可表示、非负且可表示的单价 / 成本、行金额与表头合计可表示）与在用主数据
 ///    （存在 / 未删除 / 启用的退货仓库与商品），提交 / 审核要求至少一行有效明细；
+///    ERP-524：无论是否显式链接来源，创建 / 修改在单号预约与任何明细写入之前还要求每一行显式提供的非空单位落在
+///    商品当前基础 / 装箱单位内（共享 <c>StockUnitConversion</c> 闸门；空单位保持既有回退，装箱单位恰好折算一次），
+///    提交 / 审核在既有「来源出库单行 → 退货单行」锁内用当前商品快照复核仍然生效的已存单位资格；
 /// 2) 审核后货物退回仓库：库存增加，入库成本优先取明细成本 → 来源出库流水成本 → 当前加权平均成本，
 ///    实际采用的成本会回填到明细并持久化到库存流水（估价可追溯）；
 /// 3) 审核时按商品逐行比较「已审核退货（重复商品行按基础单位合计） + 本次退货 ≤ 已审核出库数量」，
@@ -210,7 +213,9 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
         entity.CreatedAt = DateTime.Now;
         entity.WarehouseName = await ResolveWarehouseNameAsync(entity.WarehouseId, entity.WarehouseName);
         ResetDetailIds(entity);
-        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        // ERP-524：单位资格闸门与装箱折算复用同一次批量商品读取 —— 显式非空的越界单位在单号预约与
+        // 任何表头 / 明细写入之前受控拒绝；空单位保持既有回退，装箱折算恰好一次。
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details, ensureUnitEligible: true);
         // ERP-503：草稿护栏（形状 + 实际存储精度 + 在用仓库 / 商品）在单位折算之后、单号预约与任何明细写入之前执行，
         // 与是否显式链接来源无关；被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水变化。
         await SalesReturnSourceRules.EnsureDraftValidAsync(Db, entity.WarehouseId, entity.Details);
@@ -275,7 +280,8 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             entity.ReturnNo = existing.ReturnNo;
             entity.Id = id;
             ResetDetailIds(entity);
-            await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+            // ERP-524：与创建同一次批量商品读取：先判定单位资格再折算；越界单位在明细整体替换 / 任何写入之前拒绝。
+            await StockUnitConversion.NormalizeAsync(Db, entity.Details, ensureUnitEligible: true);
             // ERP-503：与创建同一草稿护栏，在明细整体替换 / 任何写入之前收敛非法仓库、非法形状与失效商品，
             // 被拒绝方不消耗新单号、既有单据与明细逐字段不变。
             await SalesReturnSourceRules.EnsureDraftValidAsync(Db, entity.WarehouseId, entity.Details);
@@ -356,6 +362,10 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             ReturnDocumentDraftRules.EnsureLineShape(entity.Details);
             if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.SalesReturnType, entity.Id) > 0)
                 throw BusinessException.RuleConflict("该销售退货单已产生库存流水，不能重复审核");
+
+            // ERP-524：在既有单据 / 来源锁内复核仍然生效明细的单位资格（当前商品快照）；越界即整体回滚，
+            // 状态 / 库存 / 流水 / 单号 / 来源容量全部保持原样。
+            await StockUnitConversion.EnsureUnitsEligibleAsync(Db, entity.Details.Where(d => !d.IsDeleted));
 
             // 来源权威性 + 累计可退容量：在锁内校验（并发退货已串行化），失败即回滚且不写任何库存。
             var link = await SalesReturnSourceRules.ValidateApprovalAsync(Db, entity);
@@ -521,6 +531,8 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             // ERP-503：提交要求至少一行有效明细，且形状 / 实际存储精度仍然有效（空草稿头可保存但不可提交）。
             SalesReturnSourceRules.EnsureHasEffectiveLine(entity.Details, "提交");
             ReturnDocumentDraftRules.EnsureLineShape(entity.Details);
+            // ERP-524：承诺边界复核仍然生效的已存明细单位资格（当前主数据实时快照；空单位保持既有回退）。
+            await StockUnitConversion.EnsureUnitsEligibleAsync(Db, entity.Details.Where(d => !d.IsDeleted));
             var link = await SalesReturnSourceRules.ValidateLinkAsync(Db, entity);
             entity.SourceStockOutNo = link is null ? entity.SourceStockOutNo : link.Shipment.StockOutNo;
 

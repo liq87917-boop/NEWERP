@@ -19,7 +19,15 @@ namespace ERP.Api.Controllers;
 /// （<see cref="NormalizeAsync(IErpDbContext, IEnumerable{StockOutDetail}, bool)"/> 与
 /// <see cref="EnsureUnitsEligibleAsync(IErpDbContext, IEnumerable{StockOutDetail}, CancellationToken)"/> 提交 / 审核承诺边界），
 /// 显式提供的非空明细单位必须落在商品当前基础 / 装箱单位内，否则在单号预约与任何表头 / 明细 / 来源 / 状态写入之前受控拒绝；
-/// <b>不改变采购入库策略</b>（ERP-522 原样），销售退货 / 采购退货仍沿用既有重载。</para>
+/// <b>不改变采购入库策略</b>（ERP-522 原样）。</para>
+/// <para>ERP-524：销售退货 / 采购退货路径显式接入<b>同一套</b>共享单位资格闸门
+/// （<see cref="NormalizeAsync(IErpDbContext, IEnumerable{SalesReturnDetail}, bool)"/> /
+/// <see cref="NormalizeAsync(IErpDbContext, IEnumerable{PurchaseReturnDetail}, bool)"/> 草稿写入，
+/// 以及 <see cref="EnsureUnitsEligibleAsync(IErpDbContext, IEnumerable{SalesReturnDetail}, CancellationToken)"/> /
+/// <see cref="EnsureUnitsEligibleAsync(IErpDbContext, IEnumerable{PurchaseReturnDetail}, CancellationToken)"/>
+/// 提交 / 审核承诺边界）：手工（未链接）与显式链接来源的草稿一律在单号预约与任何表头 / 明细 / 来源 / 状态写入之前受控拒绝越界单位，
+/// 提交 / 审核在既有单据 / 来源锁内用当前商品快照复核仍然生效的已存单位资格。
+/// <b>不改变采购入库 / 销售出库策略</b>（ERP-522 / ERP-523 原样）。</para>
 /// <para>绝不臆造来源、绝不猜测任意单位之间的换算、绝不改写历史单位：装箱折算仍恰好执行一次
 /// （当前正数 <c>UnitsPerPackage</c>，保留 4 位小数），基础单位数量保持权威。</para>
 /// </summary>
@@ -52,6 +60,19 @@ public static class StockUnitConversion
         "不重复折算）；其他任意显式非空单位一律在单号预约与任何落库之前受控拒绝；" +
         "空单位保持既有回退语义（库存流水按商品基础单位兜底）；商品未维护可用基础 / 装箱单位时对显式非空单位受控拒绝，" +
         "绝不臆造新单位或猜测任意单位换算。";
+
+    /// <summary>
+    /// ERP-524 销售退货 / 采购退货单位资格口径文案（接口 / 文档 / 测试同源）：与采购入库（ERP-522）、
+    /// 销售出库（ERP-523）<b>同一套</b>判定与受控拒绝口径，仅在启用边界上独立 ——
+    /// 销售退货 / 采购退货的草稿写入（创建 / 修改）与提交 / 审核承诺边界显式启用，
+    /// 采购入库 / 销售出库策略保持既有原样。
+    /// </summary>
+    public const string ReturnUnitEligibilityRuleText =
+        "销售退货单与采购退货单明细显式提供的非空单位（去首尾空白、大小写不敏感）必须等于商品当前基础单位或合法装箱单位：" +
+        "等于基础单位直接按基础单位记账；等于装箱单位按当前正数 UnitsPerPackage 恰好折算一次为基础单位（保留 4 位小数，" +
+        "不重复折算）；其他任意显式非空单位一律在单号预约与任何落库之前受控拒绝（手工未链接与显式链接来源同口径）；" +
+        "空单位保持既有回退语义（库存流水按商品基础单位兜底）；商品未维护可用基础 / 装箱单位时对显式非空单位受控拒绝，" +
+        "绝不臆造新单位或猜测任意单位换算；提交 / 审核在既有单据 / 来源锁内复核仍然生效的已存单位资格。";
 
     public static Task NormalizeAsync(IErpDbContext db, IEnumerable<StockInDetail> details)
         => NormalizeAsync(db, details, ensureUnitEligible: false);
@@ -94,6 +115,27 @@ public static class StockUnitConversion
     public static Task NormalizeAsync(IErpDbContext db, IEnumerable<PurchaseReturnDetail> details)
         => NormalizeAsync(db, details.Select(d => new MutableLine(d.ProductId ?? 0, () => d.Unit,
             value => d.Unit = value, () => d.Quantity, value => d.Quantity = value)), ensureUnitEligible: false);
+
+    /// <summary>
+    /// ERP-524 销售退货路径显式启用单位资格校验（与采购入库 / 销售出库同口径、同一次批量商品读取）：
+    /// 在<b>同一次批量商品读取</b>内先判定明细单位资格
+    /// （<see cref="IsUnitEligible"/>：空单位保持回退、基础 / 装箱单位放行、其他显式非空单位拒绝），
+    /// 再执行既有装箱折算（恰好一次）。任一不合格行在单号预约 / 任何写入之前抛既有受控业务错误；
+    /// 手工（未链接）与显式链接来源的草稿同口径，绝不臆造来源、绝不猜测任意单位换算。
+    /// </summary>
+    public static Task NormalizeAsync(IErpDbContext db, IEnumerable<SalesReturnDetail> details, bool ensureUnitEligible)
+        => NormalizeAsync(db, details.Select(d => new MutableLine(d.ProductId ?? 0, () => d.Unit,
+            value => d.Unit = value, () => d.Quantity, value => d.Quantity = value)), ensureUnitEligible);
+
+    /// <summary>
+    /// ERP-524 采购退货路径显式启用单位资格校验（与销售退货同口径、同一次批量商品读取）：
+    /// 在<b>同一次批量商品读取</b>内先判定明细单位资格
+    /// （<see cref="IsUnitEligible"/>：空单位保持回退、基础 / 装箱单位放行、其他显式非空单位拒绝），
+    /// 再执行既有装箱折算（恰好一次）。任一不合格行在单号预约 / 任何写入之前抛既有受控业务错误。
+    /// </summary>
+    public static Task NormalizeAsync(IErpDbContext db, IEnumerable<PurchaseReturnDetail> details, bool ensureUnitEligible)
+        => NormalizeAsync(db, details.Select(d => new MutableLine(d.ProductId ?? 0, () => d.Unit,
+            value => d.Unit = value, () => d.Quantity, value => d.Quantity = value)), ensureUnitEligible);
 
     private static async Task NormalizeAsync(IErpDbContext db, IEnumerable<MutableLine> source, bool ensureUnitEligible)
     {
@@ -177,6 +219,24 @@ public static class StockUnitConversion
         => EnsureUnitsEligibleRows(products, AsUnitRows(details));
 
     /// <summary>
+    /// ERP-524 纯判定批量复核（销售退货，口径与采购入库 / 销售出库完全一致，无 IO）：给定商品快照逐行复核明细单位资格；
+    /// 商品缺失 / 无效 Id 的行由既有在用商品护栏负责（此处跳过，绝不越权判定）。
+    /// 任一显式非空且不落在基础 / 装箱单位内的行抛既有受控业务错误（<c>RuleConflict</c>）。
+    /// </summary>
+    public static void EnsureUnitsEligible(IReadOnlyDictionary<long, BaseProduct> products,
+        IEnumerable<SalesReturnDetail> details)
+        => EnsureUnitsEligibleRows(products, AsUnitRows(details));
+
+    /// <summary>
+    /// ERP-524 纯判定批量复核（采购退货，口径与销售退货完全一致，无 IO）：给定商品快照逐行复核明细单位资格；
+    /// 商品缺失 / 无效 Id 的行由既有在用商品护栏负责（此处跳过，绝不越权判定）。
+    /// 任一显式非空且不落在基础 / 装箱单位内的行抛既有受控业务错误（<c>RuleConflict</c>）。
+    /// </summary>
+    public static void EnsureUnitsEligible(IReadOnlyDictionary<long, BaseProduct> products,
+        IEnumerable<PurchaseReturnDetail> details)
+        => EnsureUnitsEligibleRows(products, AsUnitRows(details));
+
+    /// <summary>
     /// ERP-522 承诺边界（提交 / 审核）批量复核：<b>一次有界只读查询</b>加载当前在用商品快照后逐行复核
     /// <b>仍然生效</b>明细的单位资格（调用方决定集合口径）。主数据被改写 / 单位越界时受控拒绝，
     /// 且不落库、不改单据 / 状态 / 库存 / 流水 / 单号。
@@ -208,11 +268,49 @@ public static class StockUnitConversion
         EnsureUnitsEligible(products, rows);
     }
 
+    /// <summary>
+    /// ERP-524 承诺边界（提交 / 审核）批量复核（销售退货）：<b>一次有界只读查询</b>加载当前在用商品快照后
+    /// 逐行复核 <b>仍然生效</b>明细的单位资格（调用方决定集合口径，调用方仍须先取得既有单据 / 来源行锁）。
+    /// 主数据被改写 / 单位越界时受控拒绝，且不落库、不改单据 / 状态 / 库存 / 流水 / 单号。
+    /// </summary>
+    public static async Task EnsureUnitsEligibleAsync(IErpDbContext db, IEnumerable<SalesReturnDetail> details,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var rows = details.ToList();
+        var products = await LoadEligibleProductSnapshotAsync(db, AsUnitRows(rows), ct);
+        EnsureUnitsEligible(products, rows);
+    }
+
+    /// <summary>
+    /// ERP-524 承诺边界（提交 / 审核）批量复核（采购退货）：与销售退货同口径，<b>一次有界只读查询</b>加载当前在用
+    /// 商品快照后逐行复核 <b>仍然生效</b>明细的单位资格（调用方仍须先取得既有单据 / 来源行锁）。
+    /// 主数据被改写 / 单位越界时受控拒绝，且不落库、不改单据 / 状态 / 库存 / 流水 / 单号。
+    /// </summary>
+    public static async Task EnsureUnitsEligibleAsync(IErpDbContext db, IEnumerable<PurchaseReturnDetail> details,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var rows = details.ToList();
+        var products = await LoadEligibleProductSnapshotAsync(db, AsUnitRows(rows), ct);
+        EnsureUnitsEligible(products, rows);
+    }
+
     private static IEnumerable<(long ProductId, string? Unit)> AsUnitRows(IEnumerable<StockInDetail> details)
         => details.Select(d => ((long)d.ProductId, (string?)d.Unit));
 
     private static IEnumerable<(long ProductId, string? Unit)> AsUnitRows(IEnumerable<StockOutDetail> details)
         => details.Select(d => ((long)d.ProductId, (string?)d.Unit));
+
+    private static IEnumerable<(long ProductId, string? Unit)> AsUnitRows(IEnumerable<SalesReturnDetail> details)
+        => details.Select(d => (d.ProductId ?? 0L, (string?)d.Unit));
+
+    private static IEnumerable<(long ProductId, string? Unit)> AsUnitRows(IEnumerable<PurchaseReturnDetail> details)
+        => details.Select(d => (d.ProductId ?? 0L, (string?)d.Unit));
 
     private static void EnsureUnitsEligibleRows(IReadOnlyDictionary<long, BaseProduct> products,
         IEnumerable<(long ProductId, string? Unit)> rows)
