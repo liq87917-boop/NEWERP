@@ -19,6 +19,10 @@ namespace ERP.Api.Controllers;
 /// 金额 · 来源货款申请单校验都在<b>单号预约与任何写入之前</b>完成，被拒绝的请求零表头 · 来源 · 状态变化且零占号。
 /// 来源货款申请单 Id 为可空引用（表单留空提交 <c>null</c>），服务端把 <c>null</c> / <c>0</c> 都归一为「未关联来源」，
 /// 绝不按申请单号文本或金额猜测来源。</para>
+/// <para>ERP-509：创建 / 修改在**单号预约与任何写入之前**，对按币种精度取整后的付款金额追加金额列实际存储精度
+/// （<c>DECIMAL(18,2)</c>）校验；提交 / 审核经 <see cref="SupplierPaymentLifecycleRules.EnsurePersistedPaymentConsistentAsync"/>
+/// 在既有付款单行锁内复核**已持久化**金额的同一口径。极大正金额（取整进位越过单列上限 / <c>1e16</c> / 极大十进制）
+/// 在触及单号与任何表头 / 来源 / 状态写入之前即被受控拒绝（零写入、零占号、零状态变化）；历史读取 / 取消 / 删除语义不变。</para>
 /// </summary>
 [Route("api/finance/payments")]
 public class FinancePaymentController : DocumentControllerBase<FinancePayment>

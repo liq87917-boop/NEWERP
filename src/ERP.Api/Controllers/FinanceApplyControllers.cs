@@ -423,6 +423,11 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
 /// （ERP-380 锁序：先来源申请单行、后付款单行），再加载权威状态 / 字段并在锁内复核实时身份 / 菜单授权 / 客户数据范围 /
 /// 引用付款护栏与允许的状态流转；任一步失败整体回滚，状态、原始字段与审计不变。</para>
 /// <para>定金申请单控制器（<see cref="FinanceDepositApplyController"/>）路由与语义保持不变。</para>
+/// <para>ERP-509：创建 / 修改在**单号预约与任何写入之前**，对按币种精度取整后的申请金额追加金额列实际存储精度
+/// （<c>DECIMAL(18,2)</c>）校验；提交 / 审核经
+/// <see cref="FinancePaymentApplyLifecycleRules.EnsurePersistedApplyConsistentAsync"/> 在既有申请单行锁内复核
+/// **已持久化**金额的同一口径。极大正金额（取整进位越过单列上限 / <c>1e16</c> / 极大十进制）在触及单号与任何
+/// 表头 / 来源 / 状态写入之前即被受控拒绝（零写入、零占号、零状态变化）；历史读取 / 取消 / 删除语义不变。</para>
 /// </summary>
 [Route("api/finance/payment-applies")]
 public class FinancePaymentApplyController : DocumentControllerBase<FinancePaymentApply>

@@ -11,9 +11,15 @@ namespace ERP.Application.Services;
 /// 取消 / 删除与读取，统一到同一条「实时启用身份 / 货款申请单（<c>payment-apply</c>）菜单 / 当前权威客户数据范围 +
 /// 申请单行锁」的可串行化口径上。
 /// <para><b>商业字段完整性</b>：创建与修改校验真实可用客户（存在、未删除、启用）、受支持币种、按币种精度取整后大于 0
-/// 的金额、大于 0 的汇率；可空的 <see cref="FinancePaymentApply.SalesOrderId"/> 必须按 Id 精确解析到既有、未删除、
+/// 且可被金额列实际存储精度（<c>DECIMAL(18,2)</c>，见 <see cref="FinancePersistedAmountRules"/>）原样存储的金额、
+/// 大于 0 的汇率；可空的 <see cref="FinancePaymentApply.SalesOrderId"/> 必须按 Id 精确解析到既有、未删除、
 /// 未取消、客户与本申请单一致且币种兼容的销售订单（绝不按单号文本、金额或相似度猜测来源）；历史「未关联来源」
 /// （<c>SalesOrderId == null</c>）语义原样保留，只拒绝悬空 / 越界 / 不兼容的伪造链接。</para>
+/// <para><b>ERP-509</b>：创建 / 修改在**单号预约与任何写入之前**对取整后的申请金额追加上述存储边界判定；
+/// 提交 / 审核经 <see cref="EnsurePersistedApplyConsistentAsync"/> 在既有申请单行锁内复核**已持久化**金额的同一口径。
+/// 极大正金额（取整进位越过单列上限 / <c>1e16</c> / 极大十进制）在触及单号与任何表头 / 来源 / 状态写入之前即被受控
+/// 拒绝（零写入、零占号）；币种 / 取整口径、来源资格与容量、分摊额度、确定性锁序、受控错误与审计一律原样保留，
+/// 历史读取 / 取消 / 删除不新增任何草稿有效性闸门。</para>
 /// <para><b>引用付款护栏</b>：只要还存在任一<strong>未删除且未取消</strong>的付款单
 /// （<see cref="FinancePayment.PaymentApplyId"/> 指向本申请单），就拒绝取消 / 删除申请单，也拒绝修改客户 / 来源销售订单 /
 /// 币种 / 金额 / 汇率；显式取消的付款单会释放该限制，但历史付款单与审计原样保留（绝不物理删除、绝不静默改写）。</para>
@@ -40,7 +46,7 @@ public static class FinancePaymentApplyLifecycleRules
     public const string RuleText =
         "货款申请单生命周期护栏：创建 / 修改 / 提交 / 审核 / 取消 / 删除与读取都会重新校验当前实时启用身份、" +
         "货款申请单（payment-apply）菜单授权与当前权威客户数据范围；" +
-        "创建与修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 的金额与大于 0 的汇率；" +
+        "创建与修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 且可被金额列实际存储精度（DECIMAL(18,2)）原样存储的金额与大于 0 的汇率；" +
         "提供销售订单 Id 时按 Id 精确解析既有、未删除、未取消、客户一致且币种兼容的来源订单（绝不按文本或金额猜测来源），" +
         "历史未关联来源（空来源）语义原样保留；" +
         "只要存在未删除且未取消的引用付款单，就拒绝取消 / 删除申请单或修改客户 / 来源 / 币种 / 金额 / 汇率，" +
@@ -113,7 +119,13 @@ public static class FinancePaymentApplyLifecycleRules
         => NormalizeApplyCurrency(currency.ToString());
 
     /// <summary>
-    /// 申请金额校验（服务端权威）：按币种精度四舍五入（0.5 进位）后必须大于 0；返回取整后的金额。
+    /// 申请金额校验（服务端权威）：按币种精度四舍五入（0.5 进位）后必须大于 0，且取整后的**标量金额**必须落在
+    /// 申请金额列的实际存储精度（<c>DECIMAL(18,2)</c>，见 <see cref="FinancePersistedAmountRules"/>）内 ——
+    /// 极大正金额绝不能穿透到 SQL 才被截断 / 溢出。返回取整后的金额。
+    /// <para>取整口径（含零小数币种与 <c>AwayFromZero</c>）**原样**复用
+    /// <see cref="CurrencyAmountRules.RoundAmount"/>，本方法只在取整之后追加存储边界判定（含「取整进位后越过
+    /// SQL 单列上限」）。创建 / 修改在**单号预约与任何写入之前**调用本方法；提交 / 审核经
+    /// <see cref="EnsurePersistedApplyConsistentAsync"/> 在既有申请单行锁内复核**已持久化**金额。</para>
     /// </summary>
     public static decimal NormalizeApplyAmount(decimal amount, string? currency)
     {
@@ -122,7 +134,7 @@ public static class FinancePaymentApplyLifecycleRules
             throw BusinessException.InvalidParameter(
                 $"申请金额必须大于 0：当前值 {amount} 按币种 {CurrencyAmountRules.NormalizeCurrency(currency)} "
                 + $"精度取整后为 {rounded}");
-        return rounded;
+        return FinancePersistedAmountRules.EnsureRepresentable(rounded, "申请金额按币种精度取整后");
     }
 
     /// <summary>申请单金额的权威口径（按币种精度取整；用于与历史金额比对，避免精度差异导致误判变更）</summary>
@@ -303,10 +315,12 @@ public static class FinancePaymentApplyLifecycleRules
 
     /// <summary>
     /// 用既有规则复核<strong>已持久化</strong>货款申请单的客户 / 币种 / 金额 / 汇率 / 来源链接一致性（只读，不写库、
-    /// 不新增审批要求）：客户必须存在、未删除且启用，币种必须在既有系统币种口径内，金额按币种精度取整后必须大于 0，
+    /// 不新增审批要求）：客户必须存在、未删除且启用，币种必须在既有系统币种口径内，金额按币种精度取整后必须大于 0
+    /// 且落在金额列实际存储精度（<c>DECIMAL(18,2)</c>，与创建 / 修改同一权威口径，见 <see cref="NormalizeApplyAmount"/>），
     /// 汇率必须大于 0，关联销售订单（若存在）必须仍可按 Id 解析到既有、未删除、未取消、客户一致且币种兼容的订单；
     /// 未关联销售订单的历史申请场景保持不变。
-    /// <para>提交 / 审核会在申请单行锁与同一事务内调用本方法，防止在锁外被改写的非法持久化数据被流转放行。</para>
+    /// <para>提交 / 审核会在申请单行锁与同一事务内调用本方法，防止在锁外被改写的非法持久化数据被流转放行。
+    /// <b>历史读取 / 取消 / 删除不调用本方法</b>，既有撤销语义与「不新增草稿有效性闸门」保持不变。</para>
     /// </summary>
     public static async Task EnsurePersistedApplyConsistentAsync(IErpDbContext db, FinancePaymentApply apply)
     {
