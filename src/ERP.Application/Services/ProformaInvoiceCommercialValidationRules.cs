@@ -10,12 +10,12 @@ namespace ERP.Application.Services;
 /// 转销售订单（下游承诺）全部复用本契约，系统内不允许出现第二套 PI 金额 / 定金规则：
 /// <list type="number">
 /// <item><b>币种</b>：必须是 <see cref="Currency"/> 已定义值（绝不跨币种合计，也绝不把未定义值当作某币种）；</item>
-/// <item><b>汇率</b>：必须 &gt; 0 且在持久化精度内可表示 —— <b>绝不</b>再把 0 / 负数静默替换为 1；</item>
-/// <item><b>逐行</b>：数量 &gt; 0、单价 ≥ 0 且均在实际持久化精度内可表示（绝不把正数量静默取整为 0）；</item>
+/// <item><b>汇率</b>：必须 &gt; 0 且在汇率列实际精度 <c>DECIMAL(18,6)</c> 内可表示 —— <b>绝不</b>再把 0 / 负数静默替换为 1；</item>
+/// <item><b>逐行</b>：数量 &gt; 0、单价 ≥ 0 且均在数量 / 单价列实际精度 <c>DECIMAL(18,4)</c> 内可表示（绝不把正数量静默取整为 0）；</item>
 /// <item><b>金额 / 合计</b>：一律由服务端按**已批准的币种精度与取整口径**
 /// （<see cref="CurrencyAmountRules"/>：JPY / KRW / VND / IDR 为 0 位小数、其余 2 位、0.5 进位）
 /// 从有效明细派生，绝不采信客户端行金额 / 合计；折人民币合计按 CNY 精度取整；</item>
-/// <item><b>定金比例</b>：必须 0~100（含端点）且在持久化精度内可表示；</item>
+/// <item><b>定金比例</b>：必须 0~100（含端点）且在定金比例列实际精度 <c>DECIMAL(18,4)</c> 内可表示；</item>
 /// <item><b>定金金额</b>：显式 <c>0</c> 保留既有「自动按比例计算」语义；显式**负数一律拒绝**
 /// （绝不静默按比例重算，也绝不当作「未填写」）；显式正数必须在币种精度内可表示且不得超过权威总额。</item>
 /// </list>
@@ -29,20 +29,38 @@ namespace ERP.Application.Services;
 public static class ProformaInvoiceCommercialValidationRules
 {
     /// <summary>
-    /// EF / 数据库实际精度：PI 主表与明细（<c>ProformaInvoices</c> / <c>ProformaInvoiceDetails</c>）在 EF 模型中
-    /// **未**显式 <c>HasPrecision</c>，数量 / 单价 / 行金额 / 合计 / 折人民币 / 汇率 / 定金比例 / 定金金额因此
-    /// 按 EF 默认的 <c>DECIMAL(18,2)</c> 落库。校验必须使用**同一份**精度口径，否则超精度值会被落库静默取整。
+    /// PI 主表与明细（<c>ProformaInvoices</c> / <c>ProformaInvoiceDetails</c>）的整数位数（18）。
+    /// 汇率列的小数位见 <see cref="ExchangeRateScale"/>（<c>DECIMAL(18,6)</c>），
+    /// 数量 / 单价 / 行金额 / 合计 / 折人民币 / 定金比例 / 定金金额列的小数位见 <see cref="AmountScale"/>
+    /// （<c>DECIMAL(18,4)</c>），与 SchemaUpgrader 第 21 段建表脚本、<c>ErpDbContext.Config</c> 的显式
+    /// <c>HasPrecision</c> 三处同源（ERP-534）。校验必须使用**同一份**精度口径，否则超精度值会被落库静默取整。
     /// </summary>
     public const int DecimalPrecision = 18;
 
-    /// <summary>EF / 数据库实际小数位（与 <see cref="DecimalPrecision"/> 同源）。</summary>
-    public const int DecimalScale = 2;
+    /// <summary>
+    /// 汇率列（<c>db_owner.ProformaInvoices.ExchangeRate</c>）的实际小数位：<c>DECIMAL(18,6)</c>
+    /// （EF 模型已显式 <c>HasPrecision(18, 6)</c>，与 SchemaUpgrader 第 21 段建表脚本一致）。
+    /// </summary>
+    public const int ExchangeRateScale = 6;
 
-    /// <summary><c>DECIMAL(18,2)</c> 的最大可表示值。</summary>
-    public const decimal MaxDecimal = 9_999_999_999_999_999.99m;
+    /// <summary>
+    /// 数量 / 单价 / 行金额 / 合计 / 折人民币 / 定金比例 / 定金金额列（<c>db_owner.ProformaInvoices</c> 与
+    /// <c>db_owner.ProformaInvoiceDetails</c>）的实际小数位：<c>DECIMAL(18,4)</c>
+    /// （EF 模型已显式 <c>HasPrecision(18, 4)</c>，与 SchemaUpgrader 第 21 段建表脚本一致）。
+    /// </summary>
+    public const int AmountScale = 4;
 
-    /// <summary><c>DECIMAL(18,2)</c> 的最小可表示值。</summary>
-    public const decimal MinDecimal = -9_999_999_999_999_999.99m;
+    /// <summary><c>DECIMAL(18,6)</c>（汇率列）的最大可表示值。</summary>
+    public const decimal MaxExchangeRate = 999_999_999_999.999999m;
+
+    /// <summary><c>DECIMAL(18,6)</c>（汇率列）的最小可表示值。</summary>
+    public const decimal MinExchangeRate = -999_999_999_999.999999m;
+
+    /// <summary><c>DECIMAL(18,4)</c>（数量 / 单价 / 行金额 / 合计 / 定金列）的最大可表示值。</summary>
+    public const decimal MaxAmount = 99_999_999_999_999.9999m;
+
+    /// <summary><c>DECIMAL(18,4)</c>（数量 / 单价 / 行金额 / 合计 / 定金列）的最小可表示值。</summary>
+    public const decimal MinAmount = -99_999_999_999_999.9999m;
 
     /// <summary>定金比例下限（%，含端点）。</summary>
     public const decimal MinDepositRatio = 0m;
@@ -54,7 +72,7 @@ public static class ProformaInvoiceCommercialValidationRules
     public const string CurrencyText = "PI 币种不是系统受支持的币种（Currency 枚举未定义值）";
 
     /// <summary>汇率非正 / 超精度时的拒绝文案（绝不静默按 1 处理）。</summary>
-    public const string ExchangeRateText = "PI 汇率必须大于 0 且在存储精度（DECIMAL(18,2)）内可表示";
+    public const string ExchangeRateText = "PI 汇率必须大于 0 且在存储精度（DECIMAL(18,6)）内可表示";
 
     /// <summary>客户端注入软删除明细行时的拒绝文案。</summary>
     public const string SoftDeletedDetailText =
@@ -66,11 +84,11 @@ public static class ProformaInvoiceCommercialValidationRules
 
     /// <summary>金额 / 合计超出持久化精度时的拒绝文案（绝不静默截断或取整）。</summary>
     public const string AmountOverflowText =
-        "PI 金额超出可存储范围（DECIMAL(18,2)）：已拒绝，绝不静默截断或取整改变明细合计";
+        "PI 金额超出可存储范围（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整改变明细合计";
 
     /// <summary>定金比例越界 / 超精度时的拒绝文案。</summary>
     public const string DepositRatioText =
-        "PI 定金比例必须在 0~100 之间且在存储精度（DECIMAL(18,2)）内可表示";
+        "PI 定金比例必须在 0~100 之间且在存储精度（DECIMAL(18,4)）内可表示";
 
     /// <summary>显式负定金时的拒绝文案（负数不是「未填写」，绝不静默按比例重算）。</summary>
     public const string DepositNegativeText =
@@ -78,7 +96,7 @@ public static class ProformaInvoiceCommercialValidationRules
 
     /// <summary>定金金额超出持久化 / 币种精度时的拒绝文案（绝不静默取整）。</summary>
     public const string DepositOverflowText =
-        "PI 定金金额超出存储精度（DECIMAL(18,2) 与币种精度）：已拒绝，绝不静默取整";
+        "PI 定金金额超出存储精度（DECIMAL(18,4) 与币种精度）：已拒绝，绝不静默取整";
 
     /// <summary>显式定金金额超过权威总额时的拒绝文案。</summary>
     public const string DepositExceedsTotalText = "PI 定金金额不能大于 PI 总额";
@@ -86,7 +104,8 @@ public static class ProformaInvoiceCommercialValidationRules
     /// <summary>契约口径文案（接口 / 文档同源）。</summary>
     public const string ContractText =
         "ERP-471：PI 商业条款只有一份权威契约（ProformaInvoiceCommercialValidationRules）："
-        + "币种必须是 Currency 已定义值、汇率必须大于 0 且在 DECIMAL(18,2) 内可表示、逐行数量大于 0、单价非负，"
+        + "币种必须是 Currency 已定义值、汇率必须大于 0 且在 DECIMAL(18,6)（汇率列实际精度）内可表示、"
+        + "逐行数量大于 0、单价非负且数量 / 单价 / 金额 / 合计 / 定金均在 DECIMAL(18,4)（声明列实际精度）内可表示，"
         + "行金额 / 合计 / 折人民币与自动定金一律由服务端按 CurrencyAmountRules 的币种精度"
         + "（JPY 等 0 位、其余 2 位、0.5 进位）从有效明细派生，绝不采信客户端行金额 / 合计，也不跨币种合计；"
         + "定金比例 0~100，显式定金 0 = 按比例自动计算，显式负数一律拒绝（绝不静默重算），显式正数必须"
@@ -104,10 +123,15 @@ public static class ProformaInvoiceCommercialValidationRules
     public static decimal RoundAmount(decimal amount, Currency currency)
         => CurrencyAmountRules.RoundAmount(amount, CurrencyCode(currency));
 
-    /// <summary>值是否在 <c>DECIMAL(18,2)</c> 精度内可表示（最多 2 位小数且绝对值有界）。</summary>
+    /// <summary>值是否在 <c>DECIMAL(18,4)</c> 精度内可表示（最多 4 位小数且绝对值有界）。</summary>
     public static bool IsRepresentable(decimal value)
-        => decimal.Round(value, DecimalScale) == value
-           && value >= MinDecimal && value <= MaxDecimal;
+        => decimal.Round(value, AmountScale) == value
+           && value >= MinAmount && value <= MaxAmount;
+
+    /// <summary>汇率是否在 <c>DECIMAL(18,6)</c> 精度内可表示（最多 6 位小数且绝对值有界）。</summary>
+    public static bool IsExchangeRateRepresentable(decimal value)
+        => decimal.Round(value, ExchangeRateScale) == value
+           && value >= MinExchangeRate && value <= MaxExchangeRate;
 
     /// <summary>单行「数量 × 单价」是否在持久化精度内可表示（乘法溢出按不可表示处理）。</summary>
     public static bool IsLineAmountRepresentable(decimal quantity, decimal unitPrice)
@@ -187,7 +211,7 @@ public static class ProformaInvoiceCommercialValidationRules
         if (!Enum.IsDefined(typeof(Currency), pi.Currency))
             throw BusinessException.InvalidParameter(CurrencyText);
 
-        if (pi.ExchangeRate <= 0m || !IsRepresentable(pi.ExchangeRate))
+        if (pi.ExchangeRate <= 0m || !IsExchangeRateRepresentable(pi.ExchangeRate))
             throw BusinessException.InvalidParameter(ExchangeRateText);
 
         var details = ActiveDetails(pi);
@@ -204,16 +228,16 @@ public static class ProformaInvoiceCommercialValidationRules
 
                 if (detail.Quantity <= 0m || !IsRepresentable(detail.Quantity))
                     throw BusinessException.InvalidParameter(
-                        $"PI 明细第 {line} 行数量必须大于 0 且在存储精度（DECIMAL(18,2)）内可表示：当前值 {detail.Quantity}");
+                        $"PI 明细第 {line} 行数量必须大于 0 且在存储精度（DECIMAL(18,4)）内可表示：当前值 {detail.Quantity}");
 
                 if (detail.UnitPrice < 0m || !IsRepresentable(detail.UnitPrice))
                     throw BusinessException.InvalidParameter(
-                        $"PI 明细第 {line} 行单价不能为负且必须在存储精度（DECIMAL(18,2)）内可表示：当前值 {detail.UnitPrice}");
+                        $"PI 明细第 {line} 行单价不能为负且必须在存储精度（DECIMAL(18,4)）内可表示：当前值 {detail.UnitPrice}");
 
                 var amount = RoundAmount(detail.Quantity * detail.UnitPrice, pi.Currency);
                 if (!IsRepresentable(amount))
                     throw BusinessException.InvalidParameter(
-                        $"PI 明细第 {line} 行金额 {amount} 超出存储精度（DECIMAL(18,2)）：已拒绝，绝不静默取整改变明细合计");
+                        $"PI 明细第 {line} 行金额 {amount} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默取整改变明细合计");
 
                 total += amount;
             }

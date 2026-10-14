@@ -196,6 +196,22 @@ public partial class ErpDbContext
         // ============ 单据号唯一索引（阶段 3：形式发票 PI 使用 EF 主子表） ============
         modelBuilder.Entity<ProformaInvoice>().HasIndex(x => x.PiNo).IsUnique();
 
+        // ============ ERP-534：形式发票 PI 主表 / 明细的持久化小数位（与 SchemaUpgrader 第 21 段建表脚本同源） ============
+        // 说明：权威升级脚本把 db_owner.ProformaInvoices.ExchangeRate 声明为 DECIMAL(18,6)，把 TotalAmount /
+        //       TotalAmountCny / DepositRatio / DepositAmount 声明为 DECIMAL(18,4)，把
+        //       db_owner.ProformaInvoiceDetails 的 Quantity / UnitPrice / Amount 声明为 DECIMAL(18,4)。
+        //       EF 模型此前**未**显式 HasPrecision，按 SQL Server 默认精度把这些列映射为 decimal(18,2)，
+        //       于是合法的 6 位小数汇率与 4 位小数数量 / 单价 / 定金会在写入前被**静默取整**。
+        //       这里逐列与建表脚本对齐 —— 只改映射，不新增 / 修改任何表、列、索引、菜单或权限。
+        modelBuilder.Entity<ProformaInvoice>().Property(x => x.ExchangeRate).HasPrecision(18, 6);
+        modelBuilder.Entity<ProformaInvoice>().Property(x => x.TotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<ProformaInvoice>().Property(x => x.TotalAmountCny).HasPrecision(18, 4);
+        modelBuilder.Entity<ProformaInvoice>().Property(x => x.DepositRatio).HasPrecision(18, 4);
+        modelBuilder.Entity<ProformaInvoice>().Property(x => x.DepositAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<ProformaInvoiceDetail>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<ProformaInvoiceDetail>().Property(x => x.UnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<ProformaInvoiceDetail>().Property(x => x.Amount).HasPrecision(18, 4);
+
         // ============ 报价单版本链唯一约束（ERP-035） ============
         // 同一版本链内「版本号」唯一：并发创建版本时由该唯一索引在数据库层兜底，链内不可能出现重复版本号
         // （服务端捕获唯一冲突后返回「请重试」的业务错误，见 QuotationRevisionService）。

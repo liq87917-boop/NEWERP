@@ -37,8 +37,8 @@ public class ProformaInvoiceCommercialValidationTests
     [InlineData(0)]
     [InlineData(-1)]
     [InlineData(-0.5)]
-    [InlineData(0.001)]   // 正数量但会在 DECIMAL(18,2) 被静默舍入为 0
-    [InlineData(1.005)]
+    [InlineData(0.00005)]  // 正数量但第 5 位小数：超出声明列 DECIMAL(18,4)
+    [InlineData(1.00005)]  // 第 5 位小数
     public void 条款校验_数量非正或超出持久化精度_拒绝(decimal quantity)
     {
         var pi = Draft(Line(quantity, 10m));
@@ -53,7 +53,7 @@ public class ProformaInvoiceCommercialValidationTests
     [Theory]
     [InlineData(-1)]
     [InlineData(-0.01)]
-    [InlineData(1.005)]
+    [InlineData(1.00005)]  // 第 5 位小数：超出声明列 DECIMAL(18,4)
     public void 条款校验_单价为负或超出持久化精度_拒绝(decimal unitPrice)
     {
         var pi = Draft(Line(1m, unitPrice));
@@ -81,7 +81,7 @@ public class ProformaInvoiceCommercialValidationTests
     [Theory]
     [InlineData(0)]       // 旧实现会静默按 1 处理，绝不能传播成错误折人民币金额
     [InlineData(-7.2)]
-    [InlineData(7.123)]   // 超出 DECIMAL(18,2)：落库会被静默取整
+    [InlineData(7.1234567)]   // 第 7 位小数：超出声明列 DECIMAL(18,6)
     public void 条款校验_汇率非正或不可表示_拒绝(decimal exchangeRate)
     {
         var pi = Draft(Line(1m, 1m));
@@ -124,7 +124,7 @@ public class ProformaInvoiceCommercialValidationTests
     [InlineData(-1)]
     [InlineData(-0.01)]
     [InlineData(101)]
-    [InlineData(30.005)]   // 超出 DECIMAL(18,2)
+    [InlineData(30.00005)]   // 第 5 位小数：超出声明列 DECIMAL(18,4)
     public void 定金校验_比例越界或超精度_拒绝(decimal ratio)
     {
         var pi = Draft(Line(10m, 10m));
@@ -199,7 +199,10 @@ public class ProformaInvoiceCommercialValidationTests
     [Fact]
     public void 条款校验_金额乘法溢出_受控拒绝()
     {
-        var pi = Draft(Line(9_999_999_999_999_999.99m, 9_999_999_999_999_999.99m));
+        // 两行各自在声明列 DECIMAL(18,4) 上界内可表示，但合计取整后越过上界：受控拒绝（绝不落库为截断值）。
+        var pi = Draft(
+            Line(99_999_999_999_999.99m, 1m),
+            Line(99_999_999_999_999.99m, 1m));
 
         var ex = Assert.Throws<BusinessException>(() =>
             ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(pi));
@@ -211,7 +214,8 @@ public class ProformaInvoiceCommercialValidationTests
     [Fact]
     public void 条款校验_行金额超出存储精度_受控拒绝()
     {
-        var pi = Draft(Line(9_999_999_999_999_999.99m, 2m));
+        // 数量取声明列上界（可表示），单价 2：乘积越过金额列上界 → 受控拒绝。
+        var pi = Draft(Line(ProformaInvoiceCommercialValidationRules.MaxAmount, 2m));
 
         var ex = Assert.Throws<BusinessException>(() =>
             ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(pi));
@@ -279,27 +283,34 @@ public class ProformaInvoiceCommercialValidationTests
         using var db = new ErpDbContext(options);
         var model = db.Model;   // 仅构建模型，不打开连接
 
+        Assert.Equal("decimal(18,6)", ColumnType(model, typeof(ProformaInvoice),
+            nameof(ProformaInvoice.ExchangeRate)));
+
         foreach (var property in new[]
                  {
-                     nameof(ProformaInvoice.ExchangeRate), nameof(ProformaInvoice.TotalAmount),
-                     nameof(ProformaInvoice.TotalAmountCny), nameof(ProformaInvoice.DepositRatio),
-                     nameof(ProformaInvoice.DepositAmount)
+                     nameof(ProformaInvoice.TotalAmount), nameof(ProformaInvoice.TotalAmountCny),
+                     nameof(ProformaInvoice.DepositRatio), nameof(ProformaInvoice.DepositAmount)
                  })
-            Assert.Equal("decimal(18,2)", ColumnType(model, typeof(ProformaInvoice), property));
+            Assert.Equal("decimal(18,4)", ColumnType(model, typeof(ProformaInvoice), property));
 
         foreach (var property in new[]
                  {
                      nameof(ProformaInvoiceDetail.Quantity), nameof(ProformaInvoiceDetail.UnitPrice),
                      nameof(ProformaInvoiceDetail.Amount)
                  })
-            Assert.Equal("decimal(18,2)", ColumnType(model, typeof(ProformaInvoiceDetail), property));
+            Assert.Equal("decimal(18,4)", ColumnType(model, typeof(ProformaInvoiceDetail), property));
 
         Assert.Equal(18, ProformaInvoiceCommercialValidationRules.DecimalPrecision);
-        Assert.Equal(2, ProformaInvoiceCommercialValidationRules.DecimalScale);
+        Assert.Equal(6, ProformaInvoiceCommercialValidationRules.ExchangeRateScale);
+        Assert.Equal(4, ProformaInvoiceCommercialValidationRules.AmountScale);
+        Assert.True(ProformaInvoiceCommercialValidationRules.IsExchangeRateRepresentable(
+            ProformaInvoiceCommercialValidationRules.MaxExchangeRate));
+        Assert.False(ProformaInvoiceCommercialValidationRules.IsExchangeRateRepresentable(
+            ProformaInvoiceCommercialValidationRules.MaxExchangeRate + 0.000001m));
         Assert.True(ProformaInvoiceCommercialValidationRules.IsRepresentable(
-            ProformaInvoiceCommercialValidationRules.MaxDecimal));
+            ProformaInvoiceCommercialValidationRules.MaxAmount));
         Assert.False(ProformaInvoiceCommercialValidationRules.IsRepresentable(
-            ProformaInvoiceCommercialValidationRules.MaxDecimal + 0.01m));
+            ProformaInvoiceCommercialValidationRules.MaxAmount + 0.0001m));
         Assert.Equal(0, ProformaInvoiceCommercialValidationRules.AmountDecimals(Currency.JPY));
         Assert.Equal(2, ProformaInvoiceCommercialValidationRules.AmountDecimals(Currency.USD));
     }

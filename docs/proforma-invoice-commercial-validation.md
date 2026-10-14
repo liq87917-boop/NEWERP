@@ -25,13 +25,13 @@ ERP-471 把币种 / 汇率 / 数量 / 单价 / 金额 / 合计 / 定金收敛到
 | 项 | 要求 |
 |---|---|
 | 币种 | `Currency` 枚举**已定义**值（不跨币种合计，未定义值一律拒绝） |
-| 汇率 | `> 0` 且在 `DECIMAL(18,2)` 内可表示（**绝不**再静默按 1 处理） |
-| 逐行数量 | `> 0` 且在 `DECIMAL(18,2)` 内可表示（绝不把正数量静默舍入为 0） |
-| 逐行单价 | `>= 0` 且在 `DECIMAL(18,2)` 内可表示（保留既有「零单价」政策） |
+| 汇率 | `> 0` 且在汇率列实际精度 `DECIMAL(18,6)` 内可表示（**绝不**再静默按 1 处理） |
+| 逐行数量 | `> 0` 且在数量列实际精度 `DECIMAL(18,4)` 内可表示（绝不把正数量静默舍入为 0） |
+| 逐行单价 | `>= 0` 且在单价列实际精度 `DECIMAL(18,4)` 内可表示（保留既有「零单价」政策） |
 | 明细注入 | 客户端明细中的软删除行（`IsDeleted = true`）**拒绝**，绝不静默写入 |
 | 行金额 / 合计 | 由服务端按 `CurrencyAmountRules` 的币种精度（JPY / KRW / VND / IDR 为 0 位、其余 2 位、0.5 进位）从有效明细派生；`decimal` 溢出或超精度一律受控拒绝 |
 | 折人民币合计 | `合计 × 汇率` 按 **CNY 精度（2 位）** 取整；放大后越界同样受控拒绝 |
-| 定金比例 | `0 ~ 100`（含端点）且在 `DECIMAL(18,2)` 内可表示 |
+| 定金比例 | `0 ~ 100`（含端点）且在定金比例列实际精度 `DECIMAL(18,4)` 内可表示 |
 | 定金金额 | 显式 `0` = **保留既有「按比例自动计算」语义**（自动值同样按币种精度派生）；显式**负数一律拒绝**（绝不静默重算）；显式正数必须在币种精度内可表示且**不得超过权威总额** |
 
 三种调用口径（同一份实现，不存在第二套算法）：
@@ -68,11 +68,16 @@ ERP-471 把币种 / 汇率 / 数量 / 单价 / 金额 / 合计 / 定金收敛到
 
 ## 5. 实际 EF 精度
 
-PI 主表与明细（`db_owner.ProformaInvoices` / `db_owner.ProformaInvoiceDetails`）在 EF 模型中**未**显式
-`HasPrecision`，因此数量 / 单价 / 行金额 / 合计 / 折人民币 / 汇率 / 定金比例 / 定金金额一律按 EF 默认的
-**`DECIMAL(18,2)`** 落库；契约以常量固化该口径（`DecimalPrecision = 18`、`DecimalScale = 2`、
-`MaxDecimal = 9_999_999_999_999_999.99m`），并由单元测试用 SQL Server 提供程序**仅构建模型**
-（不打开连接）逐列断言与常量同源。
+PI 主表与明细（`db_owner.ProformaInvoices` / `db_owner.ProformaInvoiceDetails`）由权威升级脚本
+（`SchemaUpgrader` 第 21 段）声明为：`ExchangeRate` 为 `DECIMAL(18,6)`，`TotalAmount` / `TotalAmountCny` /
+`DepositRatio` / `DepositAmount` 与明细 `Quantity` / `UnitPrice` / `Amount` 为 `DECIMAL(18,4)`。
+
+ERP-534 起 EF 模型（`ErpDbContext.Config.cs`）为上述八列**逐列显式声明 `HasPrecision`**，与建表脚本逐字一致，
+契约以常量固化同一口径（`DecimalPrecision = 18`、`ExchangeRateScale = 6`、`AmountScale = 4`、
+`MaxExchangeRate = 999_999_999_999.999999m`、`MaxAmount = 99_999_999_999_999.9999m`），
+并由单元测试用 SQL Server 提供程序**仅构建模型**（不打开连接）逐列断言与常量同源；
+详见 `docs/proforma-invoice-persisted-numeric-bounds.md`。修复前该模型未声明精度、按 EF 默认
+`decimal(18,2)` 映射，导致合法的六位小数汇率与四位小数数量 / 单价 / 定金被错误拒绝或在写入前被静默取整。
 
 ## 6. 边界（不做的事）
 
