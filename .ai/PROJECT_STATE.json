@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-14T03:56:38.455872Z",
+  "updated_at": "2026-10-14T04:21:41.865214Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -522,7 +522,7 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "430a032",
+    "local_sha": "da073d8",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -536,5 +536,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
