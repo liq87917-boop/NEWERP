@@ -1,0 +1,77 @@
+{
+  "title": "Validate receiving-plan quantity storage before procurement logistics commitment",
+  "description": "Close explicit receiving-plan TotalQuantity storage integrity gap. ReceivingPlanLifecycleRules.ValidateProposedAsync copies proposed.TotalQuantity unchecked; EnsureQuantityPositive only rejects <=0 at submit/approve. Actual EF SQL scalar defaults to decimal(18,2), so positive overprecision silently rounds and huge positive values fail SQL; draft writes can consume a server plan number first. Add pure representability guard through existing receiving lifecycle at draft create/update and positive commitment under existing locks. Preserve explicitly documented draft support for zero AND signed negative quantity when representable; do not invent a positivity requirement for drafts. Operational submit/approve remains positive and must preserve exact stored quantity. Do not repurpose finance amount normalization to change logistical quantity or infer booking source from legacy BookingNo. Preserve all existing identities/menu/customer scope, live masters, source ownership, deterministic row locks and transaction contracts. No new permissions, schema/migration, currency conversion or implicit inventory/finance posting. Historical reads and undo actions retain existing rules; no new draft-validity gate on cancel/void/unaudit. Adapt required original fixtures with genuine live identities/masters and original assertions intact. Explicit logs/TRX/results under .ai/logs/<task> only, preserve full original failures. Verify actual EF/SQL column types in a fresh GUID-owned isolated NEWERP_AUTOTEST; never production access, drop/reset or existing database reuse. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerControllers.cs",
+    "src/ERP.Application/Services/ReceivingPlanLifecycleRules.cs",
+    "docs/receiving-plan-numeric-bounds.md",
+    "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+    "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+    "src/ERP.IntegrationTests/ReceivingPlanLifecycleSqlServerTests.cs",
+    "src/ERP.UnitTests/ReceivingPlanNumericBoundsTests.cs",
+    "src/ERP.IntegrationTests/ReceivingPlanNumericBoundsSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Receiving-plan create/update validates TotalQuantity against actual SQL precision/range before plan numbering or tracked mutation, refusing overprecision/overflow with controlled error rather than truncation. Preserve representable zero/negative draft values and existing unit semantics, bounded texts, supplier/port/container-type validation.",
+    "Submit/approve revalidates exact positive stored quantity within existing plan locks and live authority/master gates. Existing legacy BookingNo remains text only; no inferred link or quantity posting. Invalid operations change no plan, number, status or downstream evidence; historical cancellation/read gates remain unchanged.",
+    "Meaningful unit/controller and genuine isolated SQL verify EF and SQL precision, positive/negative boundaries, exact decimals/overprecision, huge decimals, legal zero/negative drafts denied commitment, positive lifecycle and rejected zero writes/numbering. Run original receiving authorization/master/state/concurrency SQL regressions and safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Receiving-plan create/update validates TotalQuantity against actual SQL precision/range before plan numbering or tracked mutation, refusing overprecision/overflow with controlled error rather than truncation. Preserve representable zero/negative draft values and existing unit semantics, bounded texts, supplier/port/container-type validation.": [
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Application/Services/ReceivingPlanLifecycleRules.cs",
+      "docs/receiving-plan-numeric-bounds.md",
+      "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanLifecycleSqlServerTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanNumericBoundsSqlServerTests.cs"
+    ],
+    "Submit/approve revalidates exact positive stored quantity within existing plan locks and live authority/master gates. Existing legacy BookingNo remains text only; no inferred link or quantity posting. Invalid operations change no plan, number, status or downstream evidence; historical cancellation/read gates remain unchanged.": [
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Application/Services/ReceivingPlanLifecycleRules.cs",
+      "docs/receiving-plan-numeric-bounds.md",
+      "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanLifecycleSqlServerTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanNumericBoundsSqlServerTests.cs"
+    ],
+    "Meaningful unit/controller and genuine isolated SQL verify EF and SQL precision, positive/negative boundaries, exact decimals/overprecision, huge decimals, legal zero/negative drafts denied commitment, positive lifecycle and rejected zero writes/numbering. Run original receiving authorization/master/state/concurrency SQL regressions and safe Release/full units.": [
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Application/Services/ReceivingPlanLifecycleRules.cs",
+      "docs/receiving-plan-numeric-bounds.md",
+      "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanLifecycleSqlServerTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanNumericBoundsTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanNumericBoundsSqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "Container1.ContainerReceivingPlan.TotalQuantity is decimal with no explicit HasPrecision in ErpDbContext.Config (only plan-number unique index). ReceivingPlanLifecycleRules:220 copies quantity, :178-182 only positivity at operational boundary; class explicitly permits signed drafts. ERP-361/482 guard lifecycle/canonical server number but not storage representability. History/docs dedup found no receiving numeric-storage task.",
+  "depends_on": [
+    "ERP-512",
+    "ERP-361",
+    "ERP-482"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-513",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-14T01:54:30.979855Z"
+}
