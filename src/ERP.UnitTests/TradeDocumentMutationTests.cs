@@ -199,6 +199,30 @@ public class TradeDocumentMutationTests
     }
 
     [Fact]
+    public async Task 表头修改_四位小数金额_按宣告列原样保留_生命周期口径不变()
+    {
+        using var db = TestDbFactory.Create();
+        var document = SeedDocument(db, "MUT-535-A", status: "待制作", amount: 0m);
+
+        // ERP-535：宣告列 DECIMAL(18,4) 的 4 位小数金额在状态前进时原样保留（不取整、不截断）。
+        AssertOk<TradeDocument>(await BuildController(db)
+            .Update(document.Id, Edit(document, status: "已制作", amount: 128.1234m)));
+
+        var stored = db.TradeDocuments.Single(d => d.Id == document.Id);
+        Assert.Equal("已制作", stored.Status);
+        Assert.Equal(128.1234m, stored.Amount);
+
+        // 冻结状态的商业字段规则不变：4 位小数金额同样不可改写。
+        var frozen = SeedDocument(db, "MUT-535-B", status: "已提交客户", amount: 128.1234m);
+        var ex = await CodeOfAsync(ErrorCodes.RuleConflict,
+            () => BuildController(db).Update(frozen.Id,
+                Edit(frozen, status: "已提交客户", amount: 999.9999m)));
+
+        Assert.Contains("冻结", ex.Message);
+        Assert.Equal(128.1234m, db.TradeDocuments.Single(d => d.Id == frozen.Id).Amount);
+    }
+
+    [Fact]
     public async Task 新增单证_未知状态_拒绝且不落库()
     {
         using var db = TestDbFactory.Create();

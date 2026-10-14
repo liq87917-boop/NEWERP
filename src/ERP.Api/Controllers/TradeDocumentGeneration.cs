@@ -432,8 +432,9 @@ public static class TradeDocumentGeneration
         var lines = buildLines?.Invoke(docType) ?? new TradeDocumentLineSnapshotResult { DocType = docType };
         EnsureLineBound(docType, lines);
 
-        // ERP-518：编号预约与任何写入之前，先把**整批持久化标量**（表头金额 + 每一行数量 / 单价 / 净重 / 毛重 /
-        // 行金额）判定在实际列精度内；任一不可表示即受控拒绝（零编号占用、零表头 / 明细 / 来源改写）。
+        // ERP-518 / ERP-535：编号预约与任何写入之前，先把**整批持久化标量**（表头金额按宣告列 DECIMAL(18,4)；
+        // 每一行数量 / 单价 / 净重 / 毛重 DECIMAL(18,4) 与行金额 DECIMAL(18,2)）判定在实际列精度内；
+        // 任一不可表示即受控拒绝（零编号占用、零表头 / 明细 / 来源改写）。
         TradeDocumentGenerationMutationRules.EnsurePersistedBatchRepresentable(doc, lines);
 
         await EnsureUniqueDocNoAsync(db, doc, ct);

@@ -1,4 +1,4 @@
-# 单证明细行与表头金额的实际存储精度护栏（ERP-518）
+# 单证明细行与表头金额的实际存储精度护栏（ERP-518 / ERP-535）
 
 ## 1. 目标
 
@@ -13,7 +13,8 @@
 3. **来源快照生成**（销售订单 / 装柜清单 → 商业发票 / 装箱单）此前沿用的 `NormalizeQuantity` /
    `NormalizeUnitPrice` / `GrossWeightOf` 只做符号与 4 位小数判定，没有存储上界；
 4. **单证表头金额**（`TradeDocumentController.Create` / `Update`）此前直接把客户端 `Amount` 落库，
-   没有任何实际列容量判定。
+   没有任何实际列容量判定；ERP-518 首版按「模型未显式声明精度 → EF 默认 `DECIMAL(18,2)`」的**错误假设**
+   加了 2 位小数边界，**ERP-535** 已按权威升级脚本的宣告列 `DECIMAL(18,4)` 修正（见 §2 与 §4）。
 
 只补齐**标量存储边界与派生金额的存储边界**，**不**改币种 / 取整口径、单据流转、授权、来源资格、
 只读聚合展示与审计。
@@ -24,17 +25,20 @@
 |---|---|---|
 | `TradeDocumentItem.Quantity` / `UnitPrice` / `NetWeight` / `GrossWeight` | `DECIMAL(18,4)`（模型显式 `HasPrecision(18,4)`） | `ItemScalarPrecision = 18`、`ItemScalarScale = 4`（= `MaxAmountDecimals`） |
 | `TradeDocumentItem.LineAmount` | `DECIMAL(18,2)`（模型显式 `HasPrecision(18,2)`） | `LineAmountPrecision = 18`、`LineAmountScale = 2` |
-| `TradeDocument.Amount`（单证表头金额） | `DECIMAL(18,2)`（EF 默认精度，模型**未**显式声明） | `HeaderAmountPrecision = 18`、`HeaderAmountScale = 2` |
+| `TradeDocument.Amount`（单证表头金额） | `DECIMAL(18,4)`（权威升级脚本宣告列 + EF 显式 `HasPrecision(18,4)`，ERP-535） | `HeaderAmountPrecision = 18`、`HeaderAmountScale = 4` |
 
 - 边界常量与真实列类型逐字同源：单元测试以 SQL Server 提供程序**仅构建模型**断言
   `IProperty.GetPrecision()` / `GetScale()` / `GetColumnType()`；集成测试再以真实 `INFORMATION_SCHEMA.COLUMNS`
   与 SQL Server 自身「算术溢出（错误号 8115）」双重确认；
 - 标量判定**唯一复用**既有 `FinancePersistedAmountRules`（ERP-508 起的系统唯一标量边界规则，
-  `IsWithinDecimal18` / `EnsureWithinDecimal18` / `SafeMultiply`），系统内不出现第二套边界规则；
+  `IsWithinDecimal18` / `SafeMultiply`），系统内不出现第二套边界规则；单证表头金额（`DECIMAL(18,4)`，ERP-535）
+  在区间判定之上另加**逐位原样**判定（值本身不超过 4 位小数）：第 5 位小数（如 `1.00001`）与「半进位取整后
+  才恰好落到上限」的过小数位原值（如 `99_999_999_999_999.99985`）一律拒绝，恰好等于宣告列上限的值照常放行；
 - 币种取整口径**原样**复用既有 `CurrencyAmountRules.RoundAmount`（`AwayFromZero`，零小数币种
   `JPY / KRW / VND / IDR` 为 0 位、其余 2 位）：行金额只在**取整之后**追加 `DECIMAL(18,2)` 区间判定；
 - 判定顺序与 SQL Server 一致：按目标列小数位取整（`AwayFromZero`）后再判上界，因此「取整进位后越过上限」的
-  值同样被拒绝，而取整后仍在上界内的值照常放行（**绝不静默截断**）；
+  值同样被拒绝，而取整后仍在上界内的值照常放行（**绝不静默截断**）；单证表头金额另按上一条「逐位原样」口径
+  先行拒绝过小数位原值（不靠取整放行）；
 - 本护栏**只**作用于「会落库的单个标量」：**绝不**施加到 `CurrencyAmountRules.RoundAmount` 本身，也绝不施加到
   只读聚合合计（清单读取的行金额 / 箱数 / 重量合计）——求和（例如两个各自恰好等于上限的行金额合计
   `19_999_999_999_999_999.98`）可能合法地超过单个存储列容量。
@@ -46,32 +50,41 @@
 | 明细行新增 / 修改 | 授权 / 归属 / 状态 / 类型之后，**任何已跟踪写入之前**（`Add` 之前、字段赋值之前）校验数量 / 单价 / 净重 / 毛重（18,4）与**服务端计算**的行金额（18,2）；越界或乘法溢出受控拒绝（`InvalidParameter`），零写入 / 零改写 |
 | 行金额计算 | `ComputeLineAmount` = `SafeMultiply(数量, 单价)` → `CurrencyAmountRules.RoundAmount(币种)` → `EnsureLineAmountRepresentable`（18,2）；CLR 溢出转换为受控业务错误，绝不以未处理异常崩溃 |
 | 零值 / 可空语义 | 数量必须大于 0；单价 / 净重 / 毛重非负；未登记的箱数 / 净重 / 毛重保持 `null`（**不臆造为 0**）；装箱单行单价恒为 0、行金额恒为 0（零值照常放行） |
-| 单证表头金额 | `Create` 在落库前、`Update` 在**锁定父行 + 生命周期判定之后**校验拟议 `Amount` 可在 `DECIMAL(18,2)` 内表示；越界受控拒绝且零单证 / 逐字段不变（含审计时间戳） |
+| 单证表头金额 | `Create` 在落库前、`Update` 在**锁定父行 + 生命周期判定之后**校验拟议 `Amount` 可在宣告列 `DECIMAL(18,4)` 内**逐位原样**表示（最多 4 位小数）；越界 / 过小数位受控拒绝且零单证 / 逐字段不变（含审计时间戳），3 / 4 位小数金额经 EF 显式 4 位精度映射原样落库（ERP-535） |
 | 来源快照生成 | `NormalizeQuantity` / `NormalizeUnitPrice` 增加 18,4 判定（越界返回 `null`，由生成入口 fail closed 拒绝）；装柜清单毛重经 `IsGrossWeightRepresentable` 判定，越界即受控拒绝（**绝不静默留空丢弃来源重量**） |
-| 整批原子性 | 生成入口在**编号预约（`EnsureUniqueDocNoAsync`）与 `Db.Add` 之前**调用 `TradeDocumentGenerationMutationRules.EnsurePersistedBatchRepresentable(draft, lines)`：表头金额 + **每一行**明细的数量 / 单价 / 净重 / 毛重 / 行金额全部通过后才预约编号与写入；任一不可表示即整批拒绝，**零单证 / 零明细 / 零编号占用 / 零来源改写** |
+| 整批原子性 | 生成入口在**编号预约（`EnsureUniqueDocNoAsync`）与 `Db.Add` 之前**调用 `TradeDocumentGenerationMutationRules.EnsurePersistedBatchRepresentable(draft, lines)`：表头金额（`DECIMAL(18,4)`）+ **每一行**明细的数量 / 单价 / 净重 / 毛重 / 行金额全部通过后才预约编号与写入；任一不可表示即整批拒绝，**零单证 / 零明细 / 零编号占用 / 零来源改写** |
 | 只读聚合 | 清单读取（`TradeDocumentItemService.ListAsync`）的行金额合计与箱数 / 重量合计是只读派生展示，**刻意不设单列上界**；历史越界行照常可读，**不做静默修复 / 回填** |
 | 不改写项 | 不改币种 / 取整口径、来源资格、生命周期、锁序、授权与审计；不新增表 / 列 / 索引 / 迁移 / 权限 / 菜单；不做生产运维与不可逆数据操作 |
 
 ## 4. 实现
 
+- `src/ERP.Infrastructure/Data/ErpDbContext.Config.cs`（**ERP-535**）
+  - 为 `TradeDocument.Amount` 显式声明 `HasPrecision(18,4)`，与权威升级脚本第 16 段的
+    `db_owner.TradeDocuments.Amount DECIMAL(18,4)` 宣告列同源；**只声明精度**，不新增表 / 列 / 索引 /
+    菜单 / 权限，不改任何列类型、DDL 或数据。
 - `src/ERP.Application/Services/TradeDocumentItemRules.cs`
   - 新增实际列精度常量（`ItemScalarScale` / `LineAmountScale` / `HeaderAmountScale` 与对应 precision / 字段名）；
+    **ERP-535**：`HeaderAmountScale` 由 2 改为 `FinancePersistedAmountRules.DecimalScale4`（= 4），
+    并新增 `HeaderAmountPrecisionText`（逐位原样口径文案）；
   - 新增 `IsItemScalarRepresentable` / `IsLineAmountRepresentable` / `IsHeaderAmountRepresentable`
     与 `EnsureItemScalarRepresentable` / `EnsureLineAmountRepresentable` / `EnsureHeaderAmountRepresentable`
-    （复用 `FinancePersistedAmountRules`，纯判定不改写值）；
+    （复用 `FinancePersistedAmountRules`，纯判定不改写值）；**ERP-535**：表头金额判定 = 「逐位原样（≤ 4 位小数）
+    + 18,4 区间」，与固定 2 位小数的明细行金额口径**分开**；
   - 新增 `EnsurePersistedLineRepresentable(line)`（单行持久化标量整批判定，可空重量保持 `null`）；
-  - `ComputeLineAmount` 改为「受控乘法 → 既有币种取整 → 18,2 区间判定」；
+  - `ComputeLineAmount` 改为「受控乘法 → 既有币种取整 → 18,2 区间判定」（**ERP-535 未改动**）；
   - `NormalizeQuantity` / `NormalizeUnitPrice` / `NormalizeWeight` 追加 18,4 区间判定；`RuleText` 同步口径。
 - `src/ERP.Application/Services/TradeDocumentLineSnapshotRules.cs`
   - `NormalizeQuantity` / `NormalizeUnitPrice` 追加 18,4 判定（越界返回 `null`）；
   - 新增 `IsGrossWeightRepresentable(roundedWeight)`；`BuildFromLoadingList` 对越界来源毛重 fail closed；
   - `FailInvalidNumber` / 新增 `FailWeightOutOfRange` 文案说明实际列精度与「不截断 / 不臆造」。
 - `src/ERP.Application/Services/TradeDocumentGenerationMutationRules.cs`
-  - 新增 `EnsurePersistedBatchRepresentable(draft, lines)`（编号预约与写入之前的整批持久化标量复核）。
+  - 新增 `EnsurePersistedBatchRepresentable(draft, lines)`（编号预约与写入之前的整批持久化标量复核）；
+    **ERP-535**：表头金额改按宣告列 18,4 复核（调用点、顺序与其余明细口径**不变**）。
 - `src/ERP.Api/Controllers/TradeDocumentGeneration.cs`
   - `BuildDocumentAsync`：先构造明细行并做整批判定，**再**预约唯一编号与 `Db.Add`（校验先于编号与写入）。
 - `src/ERP.Api/Controllers/TradeDocumentController.cs`
-  - `Create` / `Update`：拟议表头金额 `EnsureHeaderAmountRepresentable` 先于 `Service.CreateAsync` / `Service.UpdateAsync`。
+  - `Create` / `Update`：拟议表头金额 `EnsureHeaderAmountRepresentable` 先于 `Service.CreateAsync` / `Service.UpdateAsync`
+    （**ERP-535 只更新精度文案与口径，调用点与顺序不变**）。
 - `src/ERP.Application/Services/TradeDocumentItemService.cs`：仅类文档与注释（读取侧只读聚合合计不设单列上限）。
 - `src/ERP.Application/Services/FinancePersistedAmountRules.cs`：**未改动**（复用既有标量边界规则）。
 
@@ -87,13 +100,18 @@
 ## 6. 测试
 
 - 单元测试 `src/ERP.UnitTests/TradeDocumentPersistedNumericBoundsTests.cs`（内存库 + 真实 HTTP 身份 + 真实主数据）：
-  实际 EF 列精度与规则常量同源、精确合法边界与小数位口径、行金额受控乘法 / 币种取整 / 溢出与越界受控拒绝、
-  明细行新增 / 修改越界拒绝且零写入 / 零改写、装箱单零价格与可空重量语义、单证表头新增 / 修改越界拒绝、
-  清单读取只读合计不被单列上界限制、来源快照精度规则与生成整批原子拒绝 / 合法落库与来源链接保持、
-  控制器 / 规则源码契约与文档同源。
+  实际 EF 列精度与规则常量同源（**ERP-535：`TradeDocument.Amount` 显式 `decimal(18,4)`**）、
+  精确合法边界与小数位口径、行金额受控乘法 / 币种取整 / 溢出与越界受控拒绝、
+  明细行新增 / 修改越界拒绝且零写入 / 零改写、装箱单零价格与可空重量语义、
+  **表头金额精确 4 位小数上限放行与 3 / 4 位小数逐位原样落库 / 读回、第 5 位小数与「半进位取整后恰好落到上限」
+  拒绝、量级越界拒绝且零单证 / 逐字段不变（新增与修改两条路径）**、
+  清单读取只读合计不被单列上界限制、来源快照精度规则与生成整批原子拒绝（**含表头第 5 位小数 / 量级越界**）/
+  合法落库与来源链接保持、控制器 / 规则源码契约与文档同源。
 - 集成测试 `src/ERP.IntegrationTests/TradeDocumentPersistedNumericBoundsSqlServerTests.cs`（NEWERP_AUTOTEST 护栏，真实 SQL Server）：
-  真实 `INFORMATION_SCHEMA` 列精度、边界值与 4 / 2 位小数原样往返、原始 EF 越界写入被真实列 / 驱动拒绝、
-  SQL Server 自身算术溢出（8115）、明细行 / 表头金额越界拒绝且零写入、生成整批拒绝且零单证 / 零明细、
+  真实 `INFORMATION_SCHEMA` 列精度（**ERP-535：`TradeDocuments.Amount` = `decimal(18,4)`**）、
+  边界值与 4 / 4 / 2 位小数原样往返、原始 EF 越界写入被真实列 / 驱动拒绝、
+  SQL Server 自身算术溢出（8115）、明细行与**表头金额**（4 位小数上限、3 / 4 位小数逐位原样、第 5 位小数与
+  「半进位取整后才恰好落到上限」拒绝、量级越界拒绝）越界拒绝且零写入、生成整批拒绝且零单证 / 零明细、
   合法生成落库与非专用目标库在访问前被拒绝。
 - 既有单证回归测试照常通过（`TradeDocumentItemTests`、`TradeDocumentLineSnapshotTests`、
   `TradeDocumentGenerationTests`、`TradeDocumentGenerationMutationTests`、`TradeDocumentMutationTests`、
@@ -109,7 +127,7 @@
 
 ## 8. 环境证据
 
-- 单元测试与真实 SQL 集成测试的输出 / TRX 记录于 `.ai/logs/ERP-518/`（保留原始失败日志）；
+- 单元测试与真实 SQL 集成测试的输出 / TRX 记录于 `.ai/logs/ERP-518/` 与 `.ai/logs/ERP-535/`（保留原始失败日志）；
 - 说明：本文件的完成只代表 Release 构建（含分析器 / 警告即错误）与单元测试通过，**构建完成不代表阶段验收完成**；
   真实 SQL 集成场景与最终浏览器验收由调度器 / 验收运行器按各自门禁执行。
 

@@ -193,6 +193,29 @@ public class TradeDocumentItemTests
     }
 
     [Fact]
+    public async Task 表头四位小数金额_按宣告列原样保留_明细维护不回写表头()
+    {
+        using var db = TestDbFactory.Create();
+
+        /* ERP-535：宣告列 DECIMAL(18,4) 的 4 位小数表头金额在明细行维护前后逐位原样保留（不取整、不回写） */
+        var document = SeedDocument(db, "CI-535-ITEM", "商业发票", amount: 100.1234m, currency: "USD");
+        var controller = BuildController(db);
+
+        await AddItemAsync(controller, document.Id, Item(quantity: 10m, unitPrice: 2.5m));
+        var list = await ListAsync(controller, document.Id);
+
+        Assert.True(list.HeaderAmountRecorded);
+        Assert.Equal(100.1234m, list.HeaderAmount);      // 4 位小数原样回显（只读，不按币种取整写回）
+        Assert.Equal(25m, list.LineAmountTotal);
+        Assert.True(list.AmountMismatch);
+        Assert.Contains("不会自动改写单证金额", list.AmountMismatchText);
+
+        var reloaded = await db.TradeDocuments.AsNoTracking().FirstAsync(d => d.Id == document.Id);
+        Assert.Equal(100.1234m, reloaded.Amount);        // 明细维护绝不改写表头金额
+        Assert.Equal("待制作", reloaded.Status);
+    }
+
+    [Fact]
     public async Task 装箱单_可选箱数与重量_未填写保持为空且不臆造为零()
     {
         using var db = TestDbFactory.Create();

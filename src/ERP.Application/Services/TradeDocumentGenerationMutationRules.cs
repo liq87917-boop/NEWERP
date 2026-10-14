@@ -280,9 +280,10 @@ public static class TradeDocumentGenerationMutationRules
     }
 
     /// <summary>
-    /// 生成批次的**持久化标量**复核（ERP-518，编号预约与任何写入之前）：表头金额与**每一行**明细的
-    /// 数量 / 单价 / 净重 / 毛重（<c>DECIMAL(18,4)</c>）与行金额（<c>DECIMAL(18,2)</c>）都必须能在实际列精度内
-    /// 原样落库，任一不可表示即受控拒绝（<c>InvalidParameter</c>）。
+    /// 生成批次的**持久化标量**复核（ERP-518；表头金额精度按宣告列修正为 ERP-535，编号预约与任何写入之前）：
+    /// 表头金额（<c>DECIMAL(18,4)</c>）与**每一行**明细的数量 / 单价 / 净重 / 毛重（<c>DECIMAL(18,4)</c>）与
+    /// 行金额（<c>DECIMAL(18,2)</c>）都必须能在实际列精度内逐位原样落库，任一不可表示即受控拒绝
+    /// （<c>InvalidParameter</c>）。
     /// <para>绝不截断、绝不遗漏非法明细行、绝不为凑存储把单价 / 数量臆造成 0；未登记的可选重量保持 <c>null</c>，
     /// 装箱单行的零单价 / 零金额照常放行。被拒请求零编号占用、零表头 / 明细 / 来源改写，与既有
     /// <see cref="EnsureDraftMatchesSource"/> / <see cref="EnsureLinesMatchSource"/> 在同一批复核口径内。</para>

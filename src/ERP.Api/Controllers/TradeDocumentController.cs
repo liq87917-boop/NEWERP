@@ -122,7 +122,8 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
         TradeDocumentMutationRules.EnsureKnownStatus(entity.Status);
         await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(
             _db, scope, entity);
-        // ERP-518：表头金额（DECIMAL(18,2)）必须在落库前收敛到实际列容量内，越界受控拒绝（零单证写入）。
+        // ERP-535：表头金额按宣告列精度（DECIMAL(18,4)）在落库前逐位原样校验，超过 4 位小数或越界受控拒绝
+        // （零单证写入；ERP-518 的 2 位小数假设已按宣告列修正）。
         TradeDocumentItemRules.EnsureHeaderAmountRepresentable(entity.Amount);
         var result = await Service.CreateAsync(entity);
         return Ok(ApiResponse<TradeDocument>.Success(result, "新增成功"));
@@ -150,7 +151,8 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
 
             await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(_db, scope, entity);
 
-            // ERP-518：拟议表头金额（DECIMAL(18,2)）必须在锁内落库前收敛到实际列容量内，越界受控拒绝（零改写）。
+            // ERP-535：拟议表头金额按宣告列精度（DECIMAL(18,4)）在锁内落库前逐位原样校验，超过 4 位小数或
+            // 越界受控拒绝（零改写，含审计时间戳）。
             TradeDocumentItemRules.EnsureHeaderAmountRepresentable(entity.Amount);
 
             var result = await Service.UpdateAsync(entity);

@@ -13,15 +13,16 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// ERP-518 单证明细行与单证表头金额的**实际存储精度**边界单元测试（内存库 + 真实 HTTP 身份）：
+/// ERP-518 / ERP-535 单证明细行与单证表头金额的**实际存储精度**边界单元测试（内存库 + 真实 HTTP 身份）：
 /// <list type="number">
 /// <item>实际 EF 列精度与规则常量同源：明细数量 / 单价 / 净重 / 毛重 <c>decimal(18,4)</c>、行金额
-/// <c>decimal(18,2)</c>、单证表头金额 EF 默认 <c>decimal(18,2)</c>（仅以 SQL Server 提供程序<b>仅构建模型</b>，
-/// 不连接数据库）；</item>
+/// <c>decimal(18,2)</c>、单证表头金额显式 <c>decimal(18,4)</c>（ERP-535：与权威升级脚本宣告列同源；
+/// 仅以 SQL Server 提供程序<b>仅构建模型</b>，不连接数据库）；</item>
 /// <item>明细行**手动新增 / 修改**在数量 / 单价 / 净重 / 毛重（18,4）、行金额（18,2）越界或乘法溢出时受控拒绝，
 /// 且零写入、零改写（合法边界值原样落库）；</item>
 /// <item>行金额服务端计算复用既有币种精度取整（含零小数币种），仅追加「受控乘法 + 实际列容量」判定；</item>
-/// <item>单证表头**新增 / 修改**金额越界受控拒绝且零单证 / 逐字段不变；</item>
+/// <item>单证表头**新增 / 修改**金额按宣告 4 位小数列逐位原样判定：精确 4 位小数上限与 3 / 4 位小数放行并原样
+/// 读回，第 5 位小数、量级越界与「半进位取整后恰好落到上限」受控拒绝且零单证 / 逐字段不变；</item>
 /// <item>来源快照生成（销售订单 / 装柜清单）使用同一套实际精度规则：明细越界或表头金额越界时**整批原子拒绝**，
 /// 零单证 / 零明细 / 零编号占用，来源与商品资料不被改写；保留可空重量与装箱单零价格口径；</item>
 /// <item>清单读取是**只读聚合展示**：行金额合计与重量合计刻意不施加单列存储上界（可合法超过单个列容量）；
@@ -206,17 +207,20 @@ public class TradeDocumentPersistedNumericBoundsTests
         AssertDecimalColumn(db.Model, typeof(TradeDocumentItem), nameof(TradeDocumentItem.GrossWeight), 18, 4);
         AssertDecimalColumn(db.Model, typeof(TradeDocumentItem), nameof(TradeDocumentItem.LineAmount), 18, 2);
 
-        // 单证表头金额未显式声明精度：EF SQL Server 提供程序默认 decimal(18,2)。
-        AssertDefaultDecimalColumn(db.Model, typeof(TradeDocument), nameof(TradeDocument.Amount));
+        // 单证表头金额显式声明 decimal(18,4)（ERP-535：与权威升级脚本 SchemaUpgrader 第 16 段的
+        // db_owner.TradeDocuments.Amount DECIMAL(18,4) 宣告列同源）；未声明时 EF 会按默认 decimal(18,2)
+        // 静默取整 3 / 4 位小数，并让宣告列可原样存储的值被误判为越界。
+        AssertDecimalColumn(db.Model, typeof(TradeDocument), nameof(TradeDocument.Amount), 18, 4);
 
-        // 规则常量与真实列精度同源。
+        // 规则常量与真实列精度同源（表头金额按宣告列 4 位小数，与固定 2 位小数的明细行金额分开）。
         Assert.Equal(18, TradeDocumentItemRules.ItemScalarPrecision);
         Assert.Equal(4, TradeDocumentItemRules.ItemScalarScale);
         Assert.Equal(18, TradeDocumentItemRules.LineAmountPrecision);
         Assert.Equal(2, TradeDocumentItemRules.LineAmountScale);
         Assert.Equal(18, TradeDocumentItemRules.HeaderAmountPrecision);
-        Assert.Equal(2, TradeDocumentItemRules.HeaderAmountScale);
+        Assert.Equal(4, TradeDocumentItemRules.HeaderAmountScale);
         Assert.Equal(FinancePersistedAmountRules.DecimalScale4, TradeDocumentItemRules.ItemScalarScale);
+        Assert.Equal(FinancePersistedAmountRules.DecimalScale4, TradeDocumentItemRules.HeaderAmountScale);
         Assert.Equal(FinancePersistedAmountRules.DecimalScale, TradeDocumentItemRules.LineAmountScale);
     }
 
@@ -227,15 +231,6 @@ public class TradeDocumentPersistedNumericBoundsTests
         Assert.Equal(precision, property.GetPrecision());
         Assert.Equal(scale, property.GetScale());
         Assert.Equal($"decimal({precision},{scale})", property.GetColumnType());
-    }
-
-    /// <summary>未显式声明精度的金额列：EF SQL Server 提供程序默认 <c>decimal(18,2)</c>。</summary>
-    private static void AssertDefaultDecimalColumn(IModel model, Type entityType, string propertyName)
-    {
-        var property = model.FindEntityType(entityType)!.FindProperty(propertyName)!;
-        Assert.Null(property.GetPrecision());
-        Assert.Null(property.GetScale());
-        Assert.Equal("decimal(18,2)", property.GetColumnType());
     }
 
     // ==================== 2. 精确合法边界与小数位口径 ====================
@@ -250,8 +245,18 @@ public class TradeDocumentPersistedNumericBoundsTests
 
         Assert.True(TradeDocumentItemRules.IsLineAmountRepresentable(Max2));
         Assert.False(TradeDocumentItemRules.IsLineAmountRepresentable(Max2 + 1m));
-        Assert.True(TradeDocumentItemRules.IsHeaderAmountRepresentable(Max2));
+
+        // 单证表头金额按宣告列 4 位小数（ERP-535）：精确上限与 4 位小数放行；第 5 位小数与
+        // 「半进位取整后恰好落到上限」的过小数位原值仍拒绝（绝不采信「取整之后才可存储」）；量级越界拒绝。
+        Assert.True(TradeDocumentItemRules.IsHeaderAmountRepresentable(Max4));
+        Assert.True(TradeDocumentItemRules.IsHeaderAmountRepresentable(-Max4));
+        Assert.True(TradeDocumentItemRules.IsHeaderAmountRepresentable(1234.5678m));
+        Assert.False(TradeDocumentItemRules.IsHeaderAmountRepresentable(Max4 + 1m));
+        Assert.False(TradeDocumentItemRules.IsHeaderAmountRepresentable(-(Max4 + 1m)));
         Assert.False(TradeDocumentItemRules.IsHeaderAmountRepresentable(Max2 + 1m));
+        Assert.False(TradeDocumentItemRules.IsHeaderAmountRepresentable(1.00001m));          // 第 5 位小数
+        Assert.False(TradeDocumentItemRules.IsHeaderAmountRepresentable(Max4 - 0.00005m));  // 半进位取整后恰好 = 上限
+        Assert.False(TradeDocumentItemRules.IsHeaderAmountRepresentable(Max4 + 0.00005m));  // 半进位取整后越过上限
 
         // 超精度（5 位小数）在规则入口被拒绝（不静默取整）。
         Assert.Equal(ErrorCodes.InvalidParameter, Assert.Throws<BusinessException>(
@@ -417,51 +422,63 @@ public class TradeDocumentPersistedNumericBoundsTests
         Assert.Equal(2, await db.TradeDocumentItems.CountAsync());
     }
 
-    // ==================== 6. 单证表头金额：新增 / 修改越界拒绝 ====================
+    // ==================== 6. 单证表头金额：按宣告 4 位小数列判定 ====================
 
     [Fact]
-    public async Task 单证表头新增修改_金额越界拒绝且零写入_零改写()
+    public async Task 单证表头新增修改_金额按宣告列4位小数判定_拒绝零写入_零改写()
     {
         using var db = TestDbFactory.Create();
         var controller = BuildItemController(db);
 
+        var headerSeq = 0;
         TradeDocument Header(decimal amount) => new()
         {
-            DocNo = "CI-518-HEAD", DocType = "商业发票", Status = "待制作", Amount = amount,
-            Currency = "USD", IssueDate = new DateTime(2026, 9, 20),
-            CustomerName = "义乌客户（ERP-518）", Copies = 3,
+            DocNo = $"CI-535-HEAD-{++headerSeq:D2}", DocType = "商业发票", Status = "待制作",
+            Amount = amount, Currency = "USD", IssueDate = new DateTime(2026, 9, 20),
+            CustomerName = "义乌客户（ERP-535）", Copies = 3,
         };
 
-        // 新增：越界金额受控拒绝，零单证写入。
-        var ex = await Assert.ThrowsAsync<BusinessException>(() => controller.Create(Header(Max2 + 1m)));
-        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
-        Assert.Contains("DECIMAL(18,2)", ex.Message, StringComparison.Ordinal);
-        Assert.Empty(await db.TradeDocuments.AsNoTracking().ToListAsync());
+        // 新增：量级越界 / 第 5 位小数 / 「半进位取整后恰好落到上限」一律受控拒绝，零单证写入。
+        foreach (var bad in new[] { Max4 + 1m, Max2 + 1m, 1.00001m, Max4 - 0.00005m })
+        {
+            var ex = await Assert.ThrowsAsync<BusinessException>(() => controller.Create(Header(bad)));
+            Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+            Assert.Contains("DECIMAL(18,4)", ex.Message, StringComparison.Ordinal);
+            Assert.Empty(await db.TradeDocuments.AsNoTracking().ToListAsync());
+        }
 
-        // 合法边界金额放行。
-        var created = AssertOk<TradeDocument>(await controller.Create(Header(Max2)));
-        Assert.Equal(Max2, created.Amount);
+        // 精确 4 位小数上限与 3 / 4 位小数金额放行，并按原值逐位落库 / 读回（不取整、不截断）。
+        var boundary = AssertOk<TradeDocument>(await controller.Create(Header(Max4)));
+        Assert.Equal(Max4, boundary.Amount);
+        Assert.Equal(Max4, (await db.TradeDocuments.AsNoTracking()
+            .SingleAsync(d => d.Id == boundary.Id)).Amount);
 
-        // 修改：越界金额受控拒绝，既有单证逐字段不变。
-        var before = await db.TradeDocuments.AsNoTracking().SingleAsync(d => d.Id == created.Id);
-        var edit = Edit(before, Max2 + 1m);
+        var decimals = AssertOk<TradeDocument>(await controller.Create(Header(1234.5678m)));
+        Assert.Equal(1234.5678m, decimals.Amount);
+        Assert.Equal(1234.5678m, (await db.TradeDocuments.AsNoTracking()
+            .SingleAsync(d => d.Id == decimals.Id)).Amount);
+
+        // 修改：量级越界金额受控拒绝，既有单证逐字段不变（含审计时间戳）。
+        var before = await db.TradeDocuments.AsNoTracking().SingleAsync(d => d.Id == boundary.Id);
+        var edit = Edit(before, Max4 + 1m);
         edit.Remark = "SHOULD_NOT_BE_SAVED";
         var updateEx = await Assert.ThrowsAsync<BusinessException>(
-            () => controller.Update(created.Id, edit));
+            () => controller.Update(boundary.Id, edit));
         Assert.Equal(ErrorCodes.InvalidParameter, updateEx.Code);
+        Assert.Contains("DECIMAL(18,4)", updateEx.Message, StringComparison.Ordinal);
 
-        var after = await db.TradeDocuments.AsNoTracking().SingleAsync(d => d.Id == created.Id);
+        var after = await db.TradeDocuments.AsNoTracking().SingleAsync(d => d.Id == boundary.Id);
         Assert.Equal(before.Amount, after.Amount);
         Assert.Equal(before.Remark, after.Remark);
         Assert.Equal(before.Status, after.Status);
         Assert.Equal(before.UpdatedAt, after.UpdatedAt);
 
-        // 合法边界金额修改放行（既有生命周期判定与审计口径不变）。
-        var allowed = Edit(before, Max2);
-        allowed.Remark = "边界金额修改";
-        var updated = AssertOk<TradeDocument>(await controller.Update(created.Id, allowed));
-        Assert.Equal(Max2, updated.Amount);
-        Assert.Equal("边界金额修改", updated.Remark);
+        // 4 位小数金额修改放行（既有生命周期判定与审计口径不变）。
+        var allowed = Edit(before, Max4 - 0.1111m);
+        allowed.Remark = "4 位小数金额修改";
+        var updated = AssertOk<TradeDocument>(await controller.Update(boundary.Id, allowed));
+        Assert.Equal(Max4 - 0.1111m, updated.Amount);
+        Assert.Equal("4 位小数金额修改", updated.Remark);
     }
 
     // ==================== 7. 只读聚合展示：不施加单列存储上界 ====================
@@ -554,14 +571,25 @@ public class TradeDocumentPersistedNumericBoundsTests
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C-518-B");
         var product = SeedProduct(db, "P-518-B");
-        var order = SeedSalesOrder(db, "SO-518-B", customer.Id, product.Id, totalAmount: Max2 + 1m,
+        var order = SeedSalesOrder(db, "SO-518-B", customer.Id, product.Id, totalAmount: Max4 + 1m,
             details: new[] { (1m, 1m) });
         var controller = BuildSalesOrderController(db);
 
+        // 量级越界（超过宣告列 DECIMAL(18,4) 上界）：整批拒绝，错误文案给出宣告列精度。
         var ex = await Assert.ThrowsAsync<BusinessException>(
             () => controller.GenerateTradeDocuments(order.Id, null));
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
-        Assert.Contains("DECIMAL(18,2)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("DECIMAL(18,4)", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(await db.TradeDocuments.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.TradeDocumentItems.AsNoTracking().ToListAsync());
+
+        // 第 5 位小数的表头金额（宣告列只有 4 位小数）同样整批拒绝且零写入。
+        var order5 = SeedSalesOrder(db, "SO-535-B5", customer.Id, product.Id, totalAmount: 1.00001m,
+            details: new[] { (1m, 1m) });
+        var ex5 = await Assert.ThrowsAsync<BusinessException>(
+            () => controller.GenerateTradeDocuments(order5.Id, null));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex5.Code);
+        Assert.Contains("DECIMAL(18,4)", ex5.Message, StringComparison.Ordinal);
         Assert.Empty(await db.TradeDocuments.AsNoTracking().ToListAsync());
         Assert.Empty(await db.TradeDocumentItems.AsNoTracking().ToListAsync());
     }

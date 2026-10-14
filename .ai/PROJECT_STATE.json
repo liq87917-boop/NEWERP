@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-14T08:55:47.259115Z",
+  "updated_at": "2026-10-14T09:06:31.948061Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-535"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -515,16 +513,17 @@
     "ERP-531",
     "ERP-532",
     "ERP-533",
-    "ERP-534"
+    "ERP-534",
+    "ERP-535"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-534",
+    "task": "ERP-535",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-534-validation-1.log",
-    "at": "2026-10-14T08:55:40.946969Z"
+    "log": ".ai\\logs\\ERP-535-validation-1.log",
+    "at": "2026-10-14T09:06:31.222632Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -536,16 +535,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "5c8507b",
-    "status": "synced",
+    "local_sha": "f678b74",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-14T08:55:47.105234Z",
+    "last_attempt_at": "2026-10-14T09:06:31.798398Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-535"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null

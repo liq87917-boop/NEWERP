@@ -17,11 +17,11 @@ using Xunit;
 namespace ERP.IntegrationTests;
 
 /// <summary>
-/// ERP-518 单证明细行与表头金额的实际存储精度边界真实 SQL Server 集成测试（NEWERP_AUTOTEST 护栏）。
+/// ERP-518 / ERP-535 单证明细行与表头金额的实际存储精度边界真实 SQL Server 集成测试（NEWERP_AUTOTEST 护栏）。
 /// 用与运行时完全相同的调用路径（真实控制器 + 真实 HTTP 身份 + 真实 SQL Server 上下文）验证：
 /// <list type="number">
-/// <item>真实 <c>INFORMATION_SCHEMA</c> 列精度与规则常量同源（明细 18,4 / 行金额 18,2 / 表头金额 18,2），
-/// 边界值与 4 / 2 位小数原样往返；</item>
+/// <item>真实 <c>INFORMATION_SCHEMA</c> 列精度与规则常量同源（明细 18,4 / 行金额 18,2 / 表头金额 18,4），
+/// 边界值与 4 位（明细标量 / 表头金额）与 2 位（行金额）小数原样往返；</item>
 /// <item>绕过应用层护栏的原始 EF 越界写入被真实列 / 驱动拒绝（算术溢出 8115）；SQL Server 自身的乘法溢出同样为 8115；</item>
 /// <item>明细行新增 / 单证表头新增对越界值受控拒绝且**零写入**（随后同一受权控制器合法创建成功）；</item>
 /// <item>来源生成对不可表示的来源明细 / 表头金额**整批拒绝**且零单证 / 零明细，来源单据不被改写；
@@ -231,12 +231,14 @@ public sealed class TradeDocumentPersistedNumericBoundsSqlServerTests
         Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "TradeDocumentItems", "NetWeight"));
         Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "TradeDocumentItems", "GrossWeight"));
         Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "TradeDocumentItems", "LineAmount"));
-        Assert.Equal("decimal(18,2)", await SqlColumnTypeAsync(db, "TradeDocuments", "Amount"));
+        Assert.Equal("decimal(18,4)", await SqlColumnTypeAsync(db, "TradeDocuments", "Amount"));
 
         Assert.Equal(18, TradeDocumentItemRules.ItemScalarPrecision);
         Assert.Equal(4, TradeDocumentItemRules.ItemScalarScale);
         Assert.Equal(2, TradeDocumentItemRules.LineAmountScale);
-        Assert.Equal(2, TradeDocumentItemRules.HeaderAmountScale);
+        Assert.Equal(18, TradeDocumentItemRules.HeaderAmountPrecision);
+        Assert.Equal(4, TradeDocumentItemRules.HeaderAmountScale);
+        Assert.Equal(FinancePersistedAmountRules.DecimalScale4, TradeDocumentItemRules.HeaderAmountScale);
 
         var (userId, employeeId) = await SeedOperatorAsync(db);
         var customerId = await SeedCustomerAsync(db, employeeId);
@@ -253,6 +255,23 @@ public sealed class TradeDocumentPersistedNumericBoundsSqlServerTests
         var stored = await db.TradeDocumentItems.AsNoTracking().SingleAsync(i => i.Id == dto.Id);
         Assert.Equal(Max4, stored.Quantity);
         Assert.Equal(Max2, stored.LineAmount);
+
+        // 单证表头金额（宣告列 DECIMAL(18,4)，ERP-535）：精确 4 位小数上限与 3 / 4 位小数经真实列原样读写。
+        var boundaryHeader = Assert.IsType<OkObjectResult>(
+            await controller.Create(NewHeader($"INT_E535_H_{Tag()}", Max4, customerId)));
+        var createdBoundary = Assert.IsType<ApiResponse<TradeDocument>>(boundaryHeader.Value).Data!;
+        Assert.Equal(Max4, createdBoundary.Amount);
+
+        var decimalHeader = Assert.IsType<OkObjectResult>(
+            await controller.Create(NewHeader($"INT_E535_H_{Tag()}", 1234.5678m, customerId)));
+        var createdDecimal = Assert.IsType<ApiResponse<TradeDocument>>(decimalHeader.Value).Data!;
+        Assert.Equal(1234.5678m, createdDecimal.Amount);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(Max4, (await db.TradeDocuments.AsNoTracking()
+            .SingleAsync(d => d.Id == createdBoundary.Id)).Amount);
+        Assert.Equal(1234.5678m, (await db.TradeDocuments.AsNoTracking()
+            .SingleAsync(d => d.Id == createdDecimal.Id)).Amount);
     }
 
     // ==================== 2. 原始 EF / SQL Server 自身的越界拒绝（算术溢出 8115） ====================
@@ -336,18 +355,27 @@ public sealed class TradeDocumentPersistedNumericBoundsSqlServerTests
         var ok = Assert.IsType<OkObjectResult>(await controller.CreateItem(documentId, Item(Max4, 100m)));
         Assert.Equal(ErrorCodes.Success, Assert.IsType<ApiResponse<TradeDocumentItemDto>>(ok.Value).Code);
 
-        // 单证表头金额越界：受控拒绝且零单证写入。
-        var overDocNo = $"INT_E518_H_{Tag()}";
-        var headerEx = await Assert.ThrowsAsync<BusinessException>(
-            () => controller.Create(NewHeader(overDocNo, Max2 + 1m, customerId)));
-        Assert.Equal(ErrorCodes.InvalidParameter, headerEx.Code);
-        db.ChangeTracker.Clear();
-        Assert.Equal(0, await db.TradeDocuments.AsNoTracking()
-            .CountAsync(d => d.DocNo == overDocNo && !d.IsDeleted));
+        // 单证表头金额按宣告列 DECIMAL(18,4) 判定（ERP-535）：量级越界 / 第 5 位小数 /
+        // 「半进位取整后恰好落到上限」一律受控拒绝且零单证写入。
+        foreach (var (badAmount, docNo) in new[]
+        {
+            (Max2 + 1m, $"INT_E535_H_{Tag()}"),        // 超过宣告列 DECIMAL(18,4) 上界
+            (Max4 + 1m, $"INT_E535_H_{Tag()}"),        // 精确宣告列上界的下一整数
+            (1.00001m, $"INT_E535_H_{Tag()}"),         // 第 5 位小数
+            (Max4 - 0.00005m, $"INT_E535_H_{Tag()}"),  // 半进位取整后恰好 = 上限（仍拒绝）
+        })
+        {
+            var headerEx = await Assert.ThrowsAsync<BusinessException>(
+                () => controller.Create(NewHeader(docNo, badAmount, customerId)));
+            Assert.Equal(ErrorCodes.InvalidParameter, headerEx.Code);
+            db.ChangeTracker.Clear();
+            Assert.Equal(0, await db.TradeDocuments.AsNoTracking()
+                .CountAsync(d => d.DocNo == docNo && !d.IsDeleted));
+        }
 
-        // 合法边界金额放行。
+        // 合法边界金额（宣告列精确 4 位小数上限）放行。
         var headerOk = Assert.IsType<OkObjectResult>(
-            await controller.Create(NewHeader($"INT_E518_H_{Tag()}", Max2, customerId)));
+            await controller.Create(NewHeader($"INT_E535_H_{Tag()}", Max4, customerId)));
         Assert.Equal(ErrorCodes.Success, Assert.IsType<ApiResponse<TradeDocument>>(headerOk.Value).Code);
     }
 

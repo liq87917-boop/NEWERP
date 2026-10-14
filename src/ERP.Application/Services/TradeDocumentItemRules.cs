@@ -83,17 +83,29 @@ public static class TradeDocumentItemRules
     /// <summary>行金额列的实际小数位（<c>DECIMAL(18,2)</c>）</summary>
     public const int LineAmountScale = 2;
 
-    /// <summary>单证表头金额列的实际位数（<c>DECIMAL(18,2)</c>，EF 默认精度，模型未显式声明）</summary>
+    /// <summary>
+    /// 单证表头金额列的**实际位数**（<c>DECIMAL(18,4)</c>，与权威升级脚本 <c>SchemaUpgrader</c> 建表列声明及
+    /// EF 显式 <c>HasPrecision(18,4)</c> 同源，ERP-535）。
+    /// </summary>
     public const int HeaderAmountPrecision = 18;
 
-    /// <summary>单证表头金额列的实际小数位（<c>DECIMAL(18,2)</c>，与明细行金额同精度）</summary>
-    public const int HeaderAmountScale = 2;
+    /// <summary>单证表头金额列的实际小数位（<c>DECIMAL(18,4)</c>，与 <see cref="ItemScalarScale"/> 同源）</summary>
+    public const int HeaderAmountScale = FinancePersistedAmountRules.DecimalScale4;
 
     /// <summary>行金额字段名（错误文案 / 文档同源）</summary>
     public const string LineAmountLabel = "行金额";
 
     /// <summary>单证表头金额字段名（错误文案 / 文档同源）</summary>
     public const string HeaderAmountLabel = "单证表头金额";
+
+    /// <summary>
+    /// 单证表头金额列（<c>db_owner.TradeDocuments.Amount</c> 的 <c>DECIMAL(18,4)</c>）的持久化精度口径文案
+    /// （接口 / 文档同源，ERP-535）：绝对值不超过 <c>99_999_999_999_999.9999</c> 且小数位不超过 4，
+    /// 不可逐位原样存储的值一律受控拒绝，绝不静默取整或截断。
+    /// </summary>
+    public const string HeaderAmountPrecisionText =
+        "必须在 db_owner.TradeDocuments 的 DECIMAL(18,4) 列内逐位原样可存储"
+        + "（绝对值不超过 99_999_999_999_999.9999 且小数位不超过 4）：不可表示的值一律受控拒绝，绝不静默取整或截断";
 
     /// <summary>箱数上限（有界；超过一律拒绝，避免把明显异常值写入快照）</summary>
     public const int MaxPackageCount = 1_000_000;
@@ -123,8 +135,9 @@ public static class TradeDocumentItemRules
         + "「数量 × 单价」并按币种精度计算（不接受客户端金额）；商业发票行必须使用单证币种且币种在系统币种口径内，"
         + "装箱单行不含单价与金额（恒为 0）。箱数 / 净重 / 毛重可选：未登记即为空白，不臆造为 0；填写毛重时不得小于净重。"
         + "行序留空由服务端追加，显式指定时同一单证内不得重复。"
-        + "数量 / 单价 / 净重 / 毛重必须能在实际列精度 DECIMAL(18,4) 内原样存储，行金额（服务端计算）与单证表头金额"
-        + "必须能在 DECIMAL(18,2) 内原样存储：越界一律在落库之前受控拒绝，绝不静默截断或取整。";
+        + "数量 / 单价 / 净重 / 毛重必须能在实际列精度 DECIMAL(18,4) 内原样存储，行金额（服务端计算）必须能在"
+        + "DECIMAL(18,2) 内原样存储，单证表头金额必须能在宣告列 DECIMAL(18,4) 内逐位原样存储（最多 4 位小数）："
+        + "越界或过小数位一律在落库之前受控拒绝，绝不静默截断或取整。";
 
     /// <summary>模块边界文案（明确不是第二套商品主数据 / 库存交易 / 报关核定价格）</summary>
     public const string BoundaryText =
@@ -355,9 +368,14 @@ public static class TradeDocumentItemRules
     public static bool IsLineAmountRepresentable(decimal lineAmount)
         => FinancePersistedAmountRules.IsWithinDecimal18(lineAmount, LineAmountScale);
 
-    /// <summary>单证表头金额是否可在实际列精度（<c>DECIMAL(18,2)</c>）内原样表示（只做区间判定，不改写值）。</summary>
+    /// <summary>
+    /// 单证表头金额是否可在宣告列（<c>DECIMAL(18,4)</c>）内**逐位原样**表示：值本身不超过 4 位小数
+    /// （半进位取整后恰好落到上限的过小数位原值仍然拒绝，绝不采信「取整之后才可存储」）且落在列区间内。
+    /// <para>只做判定：不取整、不截断、不改写任何状态。</para>
+    /// </summary>
     public static bool IsHeaderAmountRepresentable(decimal headerAmount)
-        => FinancePersistedAmountRules.IsWithinDecimal18(headerAmount, HeaderAmountScale);
+        => decimal.Round(headerAmount, HeaderAmountScale, MidpointRounding.AwayFromZero) == headerAmount
+           && FinancePersistedAmountRules.IsWithinDecimal18(headerAmount, HeaderAmountScale);
 
     /// <summary>
     /// 校验（并按原值返回）数量 / 单价 / 净重 / 毛重可在实际列精度内表示；越界抛受控业务错误
@@ -371,11 +389,17 @@ public static class TradeDocumentItemRules
         => FinancePersistedAmountRules.EnsureWithinDecimal18(lineAmount, LineAmountScale, LineAmountLabel);
 
     /// <summary>
-    /// 校验（并按原值返回）单证表头金额可在实际列精度（<c>DECIMAL(18,2)</c>）内表示；越界抛受控业务错误
-    /// （表头金额与明细行金额同精度，绝不静默截断）。
+    /// 校验（并按原值返回）单证表头金额可在宣告列（<c>DECIMAL(18,4)</c>）内逐位原样表示；超过 4 位小数或
+    /// 越过列区间一律抛既有受控业务错误（<c>InvalidParameter</c>，绝不静默截断或取整）。
+    /// <para>表头金额按宣告的 4 位小数列存放（ERP-535），与固定 2 位小数的明细行金额精度**不同**。</para>
     /// </summary>
     public static decimal EnsureHeaderAmountRepresentable(decimal headerAmount)
-        => FinancePersistedAmountRules.EnsureWithinDecimal18(headerAmount, HeaderAmountScale, HeaderAmountLabel);
+    {
+        if (!IsHeaderAmountRepresentable(headerAmount))
+            throw BusinessException.InvalidParameter(
+                $"{HeaderAmountLabel}{HeaderAmountPrecisionText}（当前值 {headerAmount}）");
+        return headerAmount;
+    }
 
     /// <summary>
     /// 校验一条**已构造**的明细行快照的全部持久化标量可在实际列精度内原样落库
